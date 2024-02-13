@@ -24,8 +24,8 @@ SOFTWARE.
 
 bl_info = {
     "name": "Node Sharer",
-    "author": "NodeSharer Devs",
-    "version": (0, 2, 1),
+    "author": "NodeSharer Devs, Alan Chatham",
+    "version": (0, 3, 0),
     "blender": (2, 90, 0),
     "location": "Node Editor Toolbar",
     "description": "Share node setups as text strings.",
@@ -33,10 +33,22 @@ bl_info = {
     "category": "Node",
     "tracker_url": "https://github.com/wildiness/NodeSharer#supporthelp-and-bug-reports",
 }
+# (In your __init__.py)
+# When bpy is already in local, we know this is not the initial import...
+if "bpy" in locals():
+    # ...so we need to reload our submodule(s) using importlib
+    import importlib
+    if "nodesharer" in locals():
+        importlib.reload(nodesharer)
+        print("hot reload")
+else:
+    print("bpy was not in locals")
 
+import importlib
 
 def register():
     from . import nodesharer
+    importlib.reload(nodesharer)
     nodesharer.register()
 
 

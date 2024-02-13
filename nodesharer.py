@@ -67,6 +67,9 @@ class NS_node:
         self.properties = {}
         self.node = node
 
+        # Store the node properties into self.properties,
+        #  self.pass_through is used in case this node is actually a node tree with more
+        #  nodes inside it
         self.pass_through = self.storenode()
         self.name = self.properties['name']
 
@@ -612,6 +615,23 @@ class OBJECT_MT_ns_copy_material(bpy.types.Operator):
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
 
+class OBJECT_MT_ns_export_material(bpy.types.Operator):
+    """Node Sharer: Export complete material node setup as a JSON text string to the clipboard"""  # Use this as a tooltip for menu items and buttons.
+    bl_idname = "node.ns_export_material"  # Unique identifier for buttons and menu items to reference.
+    bl_label = "Export material as text string"  # Display name in the interface.
+    bl_options = {'REGISTER'}  # 
+
+    def execute(self, context):  # execute() is called when running the operator.
+
+        my_mat = NS_material(context.material)
+        #my_mat.print_tree()
+        jsonString = my_mat.dump_mat_JSON()
+        print("jsonString type: {}".format(type(jsonString)))
+        bpy.context.window_manager.clipboard = jsonString
+        #text = 'yyyCopied material as Node Sharer text string to clipboard. Text length: '
+        #self.report({'INFO'}, text)
+
+        return {'FINISHED'}  # Lets Blender know the operator finished successfully.
 
 class OBJECT_MT_ns_paste_material(bpy.types.Operator):
     """Node Sharer: Paste complete material node setup from text string"""  # Use this as a tooltip for menu items and buttons.
@@ -636,6 +656,7 @@ class OBJECT_MT_ns_paste_material(bpy.types.Operator):
 
 def menu_func(self, context):
     self.layout.operator(OBJECT_MT_ns_copy_material.bl_idname)
+    self.layout.operator(OBJECT_MT_ns_export_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_paste_material.bl_idname)
 
 
@@ -643,6 +664,7 @@ def register():
     print("\n =============================================== \n")
     bpy.types.Scene.ns_string = bpy.props.StringProperty(name = "NodeString", default="")
     bpy.utils.register_class(OBJECT_MT_ns_copy_material)
+    bpy.utils.register_class(OBJECT_MT_ns_export_material)
     bpy.utils.register_class(OBJECT_MT_ns_paste_material)
     bpy.types.NODE_MT_node.append(menu_func)
     print("registered Add-on: Node Sharer")
@@ -651,6 +673,7 @@ def register():
 
 def unregister():
     bpy.utils.unregister_class(OBJECT_MT_ns_copy_material)
+    bpy.utils.unregister_class(OBJECT_MT_ns_export_material)
     bpy.utils.unregister_class(OBJECT_MT_ns_paste_material)
     bpy.types.NODE_MT_node.remove(menu_func)
     print("unregistered Add-on: Node Sharer")
