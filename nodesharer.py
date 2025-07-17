@@ -22,13 +22,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-
 import bpy
 import pprint
 import json
 import inspect
 import zlib
 import base64
+from bpy.props import StringProperty, BoolProperty
+from bpy_extras.io_utils import ImportHelper, ExportHelper
 # from . import compfixer
 
 
@@ -78,23 +79,27 @@ class NS_node:
         to_return = None
         tmp_prop = {}
         for attr in dir(self.node):
+#            print(attr, end=" : ")  #DEBUG
             if hasattr(self.node, attr):
+#                print(attr) #DEBUG
                 tmp_prop[attr] = getattr(self.node, attr)
+#            else: #DEBUG
+#                print("!!!!!!!!!!!!!!!!!") #DEBUG
 
         for k in tmp_prop:  # for key in node values
             if k in self._prop_common:
                 if k == 'inputs':
                     tmp_inputs = {}
-                    for idx, n_inputs in enumerate(self.node.inputs):
+                    for index, node_inputs in enumerate(self.node.inputs):
                         # key = '' + str(idx)
-                        key = idx
+                        key = index
                         try:
                             try:
-                                tmp_inputs[key] = round(n_inputs.default_value, 5)
+                                tmp_inputs[key] = round(node_inputs.default_value, 5)
                             except:
-                                tmp_inputs[key] = tuple(round(tmp_v, 5) for tmp_v in n_inputs.default_value)
+                                tmp_inputs[key] = tuple(round(tmp_v, 5) for tmp_v in node_inputs.default_value)
                         except Exception as e:
-                            print('input ' + str(idx) + ' not default value')
+                            print('input ' + str(index) + ' not default value')
                             print(e)
                             # tmp_inputs[key] = ''
                     if tmp_inputs != {}:
@@ -103,21 +108,21 @@ class NS_node:
                 elif k == 'outputs':
                     tmp_outputs = {}
                     output_default_value = {}
-                    for idx, n_outputs in enumerate(self.node.outputs):
+                    for index, node_outputs in enumerate(self.node.outputs):
                         # key = '' + str(idx)
-                        key = idx
+                        key = index
                         try:
                             try:
-                                output_default_value[key] = round(n_outputs.default_value, 5)
+                                output_default_value[key] = round(node_outputs.default_value, 5)
                             except:
-                                output_default_value[key] = tuple(round(tmp_v, 5) for tmp_v in n_outputs.default_value)
+                                output_default_value[key] = tuple(round(tmp_v, 5) for tmp_v in node_outputs.default_value)
                         except AttributeError:
                             pass
                         try:
                             # print('Dumping ' + key)
-                            if n_outputs.is_linked:
+                            if node_outputs.is_linked:
                                 tmp_links = {}
-                                for node_links in n_outputs.links:
+                                for node_links in node_outputs.links:
                                     s = node_links.to_socket.path_from_id()
                                     s = int((s.split('inputs['))[1].split(']')[0])
                                     tmp_link_name = node_links.to_node.name
@@ -131,7 +136,7 @@ class NS_node:
 
                                 tmp_outputs[key] = tmp_links
                         except:
-                            tmp_outputs[n_outputs] = str(n_outputs.links)
+                            tmp_outputs[node_outputs] = str(node_outputs.links)
                     if tmp_outputs != {}:
                         self.properties[k] = tmp_outputs
                     if output_default_value != {}:
@@ -139,7 +144,7 @@ class NS_node:
 
                 elif k == 'location':
                     try:
-                        self.properties['loc'] = (round(tmp_prop[k][0]), round(tmp_prop[k][1]),)
+                        self.properties['location'] = (round(tmp_prop[k][0]), round(tmp_prop[k][1]),)
                     except:
                         print("location/vector dump failed")
 
@@ -260,7 +265,7 @@ class NS_nodetree:
         """Indented SON for viewing"""
         # for node in self._nodes:
         #     print(node.toJSON())
-        print(json.dumps(d, default=lambda o: o.properties, indent=2))
+        return json.dumps(d, default=lambda o: o.properties, indent=2)
 
     def dump_JSON(self, d):
         """Unindented json for compressing"""
@@ -268,8 +273,8 @@ class NS_nodetree:
         # return json.dumps(d, separators=(',', ':'), default=lambda o: o.toJSON())
 
     def dumps_node_JSON(self):
-        print('JSON dump of nodes')
-        self.dumps_json(self._nodes)
+        #print('JSON dump of nodes')
+        return self.dumps_json(self._nodes)
 
 
 class NS_material(NS_nodetree):
@@ -446,22 +451,22 @@ class NS_mat_constructor(NS_nodetree):
 
         # remove stock BSDF and output if creating a material
         if is_material is True:
-            for n in b_nodes:
-                b_nodes.remove(n)
+            for node_to_remove in b_nodes:
+                b_nodes.remove(node_to_remove)
 
-        for k in ns_nodes:
-            print('Constructing node:' + k + '\n')
+        for key in ns_nodes:
+            print('Constructing node:' + key + '\n')
 
-            n = ns_nodes[k]
+            stored_ns_node = ns_nodes[key]
 
-            bl_idname = n.pop('bl_idname')
-            name = n.pop('name')
+            bl_idname = stored_ns_node.pop('bl_idname')
+            name = stored_ns_node.pop('name')
 
             # if is_material is True:
             # if True:
-            node = b_nodes.new(bl_idname)
-            node.name = name
-            b_node_names[name] = node.name
+            created_blender_node = b_nodes.new(bl_idname)
+            created_blender_node.name = name
+            b_node_names[name] = created_blender_node.name
             # else:
             #     try:
             #         node = b_nodes[name]
@@ -473,89 +478,89 @@ class NS_mat_constructor(NS_nodetree):
 
             # self._created_nodes.append(node)
 
-            loc = n.pop('loc')
-            node.location = (loc[0], loc[1])
+            loc = stored_ns_node.pop('location')
+            created_blender_node.location = (loc[0], loc[1])
 
-            ns_node_tree = n.pop('node_tree', None)
+            ns_node_tree = stored_ns_node.pop('node_tree', None)
             if ns_node_tree is not None:
                 try:
-                    node.node_tree = bpy.data.node_groups[self._created_groups[ns_node_tree]]
+                    created_blender_node.node_tree = bpy.data.node_groups[self._created_groups[ns_node_tree]]
                 except Exception as e:
                     print('Group node node tree assignment failed')
                     print(e)
 
-            inputs = n.pop('inputs', None)
+            inputs = stored_ns_node.pop('inputs', None)
             if inputs is not None:
                 for i in inputs:
                     v = inputs[i]
                     try:
-                        node.inputs[int(i)].default_value = v
+                        created_blender_node.inputs[int(i)].default_value = v
                     except Exception as e:
                         print('Failed to set input default value')
                         print(e)
 
-            out_dv = n.pop('out_dv', None)
+            out_dv = stored_ns_node.pop('out_dv', None)
             if out_dv is not None:
                 for i in out_dv:
                     v = out_dv[i]
                     try:
-                        node.outputs[int(i)].default_value = v
+                        created_blender_node.outputs[int(i)].default_value = v
                     except Exception as e:
                         print('Failed to set output default value')
                         print(e)
 
-            outputs = n.pop('outputs', None)
+            outputs = stored_ns_node.pop('outputs', None)
             if outputs is not None:
                 to_link.append({name: outputs})
 
-            color_ramp = n.pop('color_ramp', None)
+            color_ramp = stored_ns_node.pop('color_ramp', None)
             if color_ramp is not None:
                 elements = color_ramp['elements']
-                node.color_ramp.color_mode = color_ramp['color_mode']
-                node.color_ramp.hue_interpolation = color_ramp['hue_interpolation']
-                node.color_ramp.interpolation = color_ramp['interpolation']
+                created_blender_node.color_ramp.color_mode = color_ramp['color_mode']
+                created_blender_node.color_ramp.hue_interpolation = color_ramp['hue_interpolation']
+                created_blender_node.color_ramp.interpolation = color_ramp['interpolation']
                 i = 0
                 for p, c in elements.items():
                     if i > 1:
-                        new_cr_ele = node.color_ramp.elements.new(position=float(p))
+                        new_cr_ele = created_blender_node.color_ramp.elements.new(position=float(p))
                         new_cr_ele.color = c
                     else:
-                        node.color_ramp.elements[i].position = float(p)
-                        node.color_ramp.elements[i].color = c
+                        created_blender_node.color_ramp.elements[i].position = float(p)
+                        created_blender_node.color_ramp.elements[i].color = c
                     i += 1
 
-            mapping = n.pop('mapping', None)
+            mapping = stored_ns_node.pop('mapping', None)
             if mapping is not None:
                 curves = mapping.pop('curves')
                 for idc, curve in curves.items():
                     for idp, point in curve.items():
                         if int(idp) > 1:
-                            node.mapping.curves[int(idc)].points.new(point[0], point[1])
+                            created_blender_node.mapping.curves[int(idc)].points.new(point[0], point[1])
                         else:
-                            node.mapping.curves[int(idc)].points[int(idp)].location = point
+                            created_blender_node.mapping.curves[int(idc)].points[int(idp)].location = point
 
                 while len(mapping) > 0:
-                    k, v = mapping.popitem()
+                    key, v = mapping.popitem()
                     try:
-                        setattr(node.mapping, k, v)
+                        setattr(created_blender_node.mapping, key, v)
                     except Exception as e:
-                        print('failed to set mapping attribute: ' + str(k))
+                        print('failed to set mapping attribute: ' + str(key))
                         print(e)
 
-            parent = n.pop('parent', None)
+            parent = stored_ns_node.pop('parent', None)
             if parent is not None:
                 to_parent[name] = parent
 
-            while len(n) > 0:
-                k, v = n.popitem()
+            while len(stored_ns_node) > 0:
+                key, v = stored_ns_node.popitem()
                 try:
-                    setattr(node, k, v)
+                    setattr(created_blender_node, key, v)
                 except Exception as e:
-                    print('failed to set attribute: ' + str(k))
+                    print('failed to set attribute: ' + str(key))
                     print(e)
 
         for l in to_link:
-            k, v = l.popitem()
+            key, v = l.popitem()
 
             for output, targets in v.items():
                 for name, ids in targets.items():
@@ -569,25 +574,25 @@ class NS_mat_constructor(NS_nodetree):
                             # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
                             if is_material:
                                 bpy.data.materials[self.b_mat_name_actual].node_tree.links.new(
-                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[k]].outputs[
+                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].outputs[
                                         int(output)],
                                     bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[
                                         b_node_names[name]].inputs[i])  # test
                             elif is_nodegroup:
                                 bpy.data.node_groups[nt_parent_name].links.new(
-                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[k]].outputs[int(output)],
+                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
                                     bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
                         except Exception as e:
                             print('Failed to link')
                             print(e)
 
-        for k, v in to_parent.items():
+        for key, v in to_parent.items():
             try:
                 if is_material:
-                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[k]].parent = \
+                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].parent = \
                         bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[v]]
                 elif is_nodegroup:
-                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[k]].parent = \
+                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].parent = \
                         bpy.data.node_groups[nt_parent_name].nodes[b_node_names[v]]
                 # Location of the frame, if shrink is active, depends on the location of the nodes parented to the frame
                 # but the location of the nodes parented to the frame depends on the location of the frame
@@ -601,12 +606,14 @@ class NS_mat_constructor(NS_nodetree):
 class OBJECT_MT_ns_copy_material(bpy.types.Operator):
     """Node Sharer: Copy complete material node setup as text string"""  # Use this as a tooltip for menu items and buttons.
     bl_idname = "node.ns_copy_material"  # Unique identifier for buttons and menu items to reference.
-    bl_label = "Copy material as text string"  # Display name in the interface.
+    bl_label = "Copy material as a text string"  # Display name in the interface.
     bl_options = {'REGISTER'}  # 
 
     def execute(self, context):  # execute() is called when running the operator.
-
-        my_mat = NS_material(context.material)
+        
+        #my_mat = NS_material(context.material)
+        my_mat = NS_material(context.space_data.edit_tree)
+        print("here is text2")
         my_mat.print_tree()
         ns_string, length = my_mat.compress()
         bpy.types.Scene.ns_string = ns_string
@@ -622,14 +629,32 @@ class OBJECT_MT_ns_export_material(bpy.types.Operator):
     bl_options = {'REGISTER'}  # 
 
     def execute(self, context):  # execute() is called when running the operator.
-
-        my_mat = NS_material(context.material)
+        print("\n")
+        print(dir(context)) #DEBUG
+        print("\n")
+        
+        # Materials have a bunch of properties outside of just the node tree,
+        #  so if we're in the shader editor, we run the original code
+        if (context.material): 
+            print ("The current context has a material")
+            my_mat = NS_material(context.material)
+#        my_mat = NS_material(context.space_data.edit_tree) #DEBUG
         #my_mat.print_tree()
-        jsonString = my_mat.dump_mat_JSON()
-        print("jsonString type: {}".format(type(jsonString)))
-        bpy.context.window_manager.clipboard = jsonString
+            jsonString = my_mat.dump_mat_JSON()
+            print("jsonString type: {}".format(type(jsonString)))
+            bpy.context.window_manager.clipboard = jsonString
         #text = 'yyyCopied material as Node Sharer text string to clipboard. Text length: '
         #self.report({'INFO'}, text)
+        else:
+            print("We were in a different node editor")
+            editor_node_tree = context.space_data.edit_tree
+            my_node_tree = NS_nodetree()
+            for node in editor_node_tree.nodes:
+                my_node_tree.add_node(node)
+                print("Added node")
+            print("JSON: ")
+            print(my_node_tree.dumps_node_JSON())
+            print("over")
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
 
@@ -653,11 +678,87 @@ class OBJECT_MT_ns_paste_material(bpy.types.Operator):
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
 
+class OBJECT_MT_ns_unregister_addon(bpy.types.Operator):
+    """Node Sharer: unregisters the addon for debugging"""  # Use this as a tooltip for menu items and buttons.
+    bl_idname = "node.ns_unregister_addon"  # Unique identifier for buttons and menu items to reference.
+    bl_label = "Unregister NodeSharer"  # Display name in the interface.
+    bl_options = {'REGISTER'}  #
+
+    def execute(self, context):  # execute() is called when running the operator.
+        print('unregistering...')
+        unregister()
+
+        return {'FINISHED'}  # Lets Blender know the operator finished successfully.
+    
+class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
+    """Node Sharer: Saves this node tree to a JSON file"""
+    bl_idname = "node.ns_save_nodetree_to_file"
+    bl_label = "Save Nodetree to File"
+    bl_options = {'REGISTER'}
+    
+    filename: StringProperty(
+        name="Outdir Path",
+        description="Where I will save my stuff",
+        subtype='FILE_NAME'
+        # subtype='DIR_PATH' is not needed to specify the selection mode.
+        # But this will be anyway a directory path.
+        )
+    
+    
+#    filepath: StringProperty(
+#        name="Outdir Path",
+#        description="Where I will save my stuff",
+#        subtype='FILE_PATH'
+#        # subtype='DIR_PATH' is not needed to specify the selection mode.
+#        # But this will be anyway a directory path.
+#        ) 
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None
+    
+    def execute(self, context):
+        # guard against a switched context
+        if self.options.is_invoke:
+            # The context may have changed since invoking the file selector.
+                self.report({'ERROR'}, "Invalid context")
+                return {'CANCELLED'}
+
+        print("Selected file: '" + self.filename + "'")
+        
+        # Get our node tree
+        editor_node_tree = context.space_data.edit_tree
+        # make sure we have one
+        if (editor_node_tree != None):
+            my_node_tree = NS_nodetree()
+            for node in editor_node_tree.nodes:
+                my_node_tree.add_node(node)
+            print("JSON:")
+            print(my_node_tree.dumps_node_JSON())
+            print("finished")
+        else:
+            print("No node tree available, has the context changed?")
+
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        self.filename = context.space_data.edit_tree.name_full + ".json"
+        print()
+        # Open browser, take reference to 'self' read the path to selected
+        # file, put path in predetermined self fields.
+        # See: https://docs.blender.org/api/current/bpy.types.WindowManager.html#bpy.types.WindowManager.fileselect_add
+        context.window_manager.fileselect_add(self)
+        # Tells Blender to hang on for the slow user input
+        return {'RUNNING_MODAL'}
+
+
 
 def menu_func(self, context):
     self.layout.operator(OBJECT_MT_ns_copy_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_export_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_paste_material.bl_idname)
+    self.layout.operator(OBJECT_MT_ns_unregister_addon.bl_idname)
+    self.layout.operator(OBJECT_MT_ns_save_nodetree_to_file.bl_idname)
+    
 
 
 def register():
@@ -666,6 +767,8 @@ def register():
     bpy.utils.register_class(OBJECT_MT_ns_copy_material)
     bpy.utils.register_class(OBJECT_MT_ns_export_material)
     bpy.utils.register_class(OBJECT_MT_ns_paste_material)
+    bpy.utils.register_class(OBJECT_MT_ns_unregister_addon)
+    bpy.utils.register_class(OBJECT_MT_ns_save_nodetree_to_file)
     bpy.types.NODE_MT_node.append(menu_func)
     print("registered Add-on: Node Sharer")
     print("\n =============================================== \n")
@@ -675,6 +778,7 @@ def unregister():
     bpy.utils.unregister_class(OBJECT_MT_ns_copy_material)
     bpy.utils.unregister_class(OBJECT_MT_ns_export_material)
     bpy.utils.unregister_class(OBJECT_MT_ns_paste_material)
+    bpy.utils.unregister_class(OBJECT_MT_ns_unregister_addon)
     bpy.types.NODE_MT_node.remove(menu_func)
     print("unregistered Add-on: Node Sharer")
 

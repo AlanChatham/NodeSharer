@@ -4,3 +4,4 @@ Text.py
 misc
 .idea
 .vscode/settings.json
+__pycache__/nodesharer.cpython-311.pyc
