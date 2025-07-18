@@ -28,8 +28,10 @@ import json
 import inspect
 import zlib
 import base64
+import os
 from bpy.props import StringProperty, BoolProperty
 from bpy_extras.io_utils import ImportHelper, ExportHelper
+
 # from . import compfixer
 
 
@@ -235,8 +237,12 @@ class NS_nodetree:
 
     groups = {}
 
-    def __init__(self):
+    def __init__(self, blender_node_tree = None):
         self._nodes = {}
+        # Material copy uses this blank and fills it itself,
+        #  but we can instantiate it with blender node tree data
+        if (blender_node_tree != None):
+            self.get_nodes(blender_node_tree)
 
     def add_node(self, node):
         """Add node to node tree"""
@@ -246,6 +252,10 @@ class NS_nodetree:
         if n.pass_through is not None:
             k, v = n.pass_through.popitem()
             self.groups[k] = v
+
+    def get_nodes(self, blender_node_tree):
+        for node in blender_node_tree:
+            self.add_node(node)
 
     def make_dict(self):
         tmp_dict = {}
@@ -285,7 +295,7 @@ class NS_material(NS_nodetree):
         self._mat = mat
         self.name = self._mat.name
         self.groups.clear()
-        self.get_nodes()
+        self.get_nodes(self._mat.node_tree.nodes)
         self.ns_mat = {'name': self.name,
                        'type': 'material',
                        'nodes': self._nodes}
@@ -690,6 +700,12 @@ class OBJECT_MT_ns_unregister_addon(bpy.types.Operator):
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
     
+class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
+    """Node Sharer: Saves this node tree to a JSON file"""
+    bl_idname = "node.ns_load_nodetree_from_file"
+    bl_label = "Load Nodetree from File"
+    bl_options = {'REGISTER'}
+    
 class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
     """Node Sharer: Saves this node tree to a JSON file"""
     bl_idname = "node.ns_save_nodetree_to_file"
@@ -705,35 +721,35 @@ class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
         )
     
     
-#    filepath: StringProperty(
-#        name="Outdir Path",
-#        description="Where I will save my stuff",
-#        subtype='FILE_PATH'
-#        # subtype='DIR_PATH' is not needed to specify the selection mode.
-#        # But this will be anyway a directory path.
-#        ) 
+    filepath: StringProperty(
+        name="Outdir Path",
+        description="Where I will save my stuff",
+        subtype='FILE_PATH'
+        # subtype='DIR_PATH' is not needed to specify the selection mode.
+        # But this will be anyway a directory path.
+        ) 
     @classmethod
     def poll(cls, context):
         return context.object is not None
     
     def execute(self, context):
         # guard against a switched context
-        if self.options.is_invoke:
+        #if self.options.is_invoke:
             # The context may have changed since invoking the file selector.
-                self.report({'ERROR'}, "Invalid context")
-                return {'CANCELLED'}
+        #        self.report({'ERROR'}, "Invalid context")
+        #        return {'CANCELLED'}
 
         print("Selected file: '" + self.filename + "'")
+        print("Full path: " + self.filepath)
         
         # Get our node tree
         editor_node_tree = context.space_data.edit_tree
         # make sure we have one
         if (editor_node_tree != None):
-            my_node_tree = NS_nodetree()
-            for node in editor_node_tree.nodes:
-                my_node_tree.add_node(node)
-            print("JSON:")
-            print(my_node_tree.dumps_node_JSON())
+            my_node_tree = NS_nodetree(editor_node_tree.nodes)
+            
+            with open( self.filepath, "w") as file:
+                file.write(my_node_tree.dumps_node_JSON())
             print("finished")
         else:
             print("No node tree available, has the context changed?")
@@ -741,8 +757,9 @@ class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        self.filename = context.space_data.edit_tree.name_full + ".json"
-        print()
+        nodetree_name = context.space_data.edit_tree.name_full
+        nodetree_name = nodetree_name.replace(" ", "")
+        self.filename =  nodetree_name + ".json"
         # Open browser, take reference to 'self' read the path to selected
         # file, put path in predetermined self fields.
         # See: https://docs.blender.org/api/current/bpy.types.WindowManager.html#bpy.types.WindowManager.fileselect_add
@@ -758,6 +775,7 @@ def menu_func(self, context):
     self.layout.operator(OBJECT_MT_ns_paste_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_unregister_addon.bl_idname)
     self.layout.operator(OBJECT_MT_ns_save_nodetree_to_file.bl_idname)
+    self.layout.operator(OBJECT_MT_ns_load_nodetree_from_file.bl_idname)
     
 
 
@@ -769,6 +787,7 @@ def register():
     bpy.utils.register_class(OBJECT_MT_ns_paste_material)
     bpy.utils.register_class(OBJECT_MT_ns_unregister_addon)
     bpy.utils.register_class(OBJECT_MT_ns_save_nodetree_to_file)
+    bpy.utils.register_class(OBJECT_MT_ns_load_nodetree_from_file)
     bpy.types.NODE_MT_node.append(menu_func)
     print("registered Add-on: Node Sharer")
     print("\n =============================================== \n")
