@@ -252,8 +252,10 @@ class NS_nodetree:
         if n.pass_through is not None:
             k, v = n.pass_through.popitem()
             self.groups[k] = v
-
+    
+    
     def get_nodes(self, blender_node_tree):
+        """Fill the NS_nodetree from blender data"""
         for node in blender_node_tree:
             self.add_node(node)
 
@@ -285,6 +287,181 @@ class NS_nodetree:
     def dumps_node_JSON(self):
         #print('JSON dump of nodes')
         return self.dumps_json(self._nodes)
+    
+    def construct(self, ns_nodes, nt, nt_parent_name, is_material=False, is_nodegroup=False):
+        """
+        Constructs a node tree
+        :param nt_parent_name: name of node tree parent, either material or node group
+        :param is_nodegroup: bool is node group
+        :param ns_nodes: node sharer dict
+        :param nt: Blender node tree
+        :param is_material: bool is material
+        """
+        # b_nodes = nt.nodes  # original
+        to_link = []
+        to_parent = {}
+        b_node_names = {}  # Node sharer name: blender actual name
+
+        if is_material:
+            b_nodes = bpy.data.materials[self.b_mat_name_actual].node_tree.nodes
+        elif is_nodegroup:
+            b_nodes = bpy.data.node_groups[nt_parent_name].nodes
+        else:
+            print('Did not specify material or node group')
+            return
+
+        # remove stock BSDF and output if creating a material
+        if is_material is True:
+            for node_to_remove in b_nodes:
+                b_nodes.remove(node_to_remove)
+
+        for key in ns_nodes:
+            print('Constructing node:' + key + '\n')
+
+            stored_ns_node = ns_nodes[key]
+
+            bl_idname = stored_ns_node.pop('bl_idname')
+            name = stored_ns_node.pop('name')
+
+            # if is_material is True:
+            # if True:
+            created_blender_node = b_nodes.new(bl_idname)
+            created_blender_node.name = name
+            b_node_names[name] = created_blender_node.name
+            # else:
+            #     try:
+            #         node = b_nodes[name]
+            #     except Exception as e:
+            #         print('No existing node with that name, creating...')
+            #         print(e)
+            #         node = b_nodes.new(bl_idname)
+            #         node.name = name
+
+            # self._created_nodes.append(node)
+
+            loc = stored_ns_node.pop('location')
+            created_blender_node.location = (loc[0], loc[1])
+
+            ns_node_tree = stored_ns_node.pop('node_tree', None)
+            if ns_node_tree is not None:
+                try:
+                    created_blender_node.node_tree = bpy.data.node_groups[self._created_groups[ns_node_tree]]
+                except Exception as e:
+                    print('Group node node tree assignment failed')
+                    print(e)
+
+            inputs = stored_ns_node.pop('inputs', None)
+            if inputs is not None:
+                for i in inputs:
+                    v = inputs[i]
+                    try:
+                        created_blender_node.inputs[int(i)].default_value = v
+                    except Exception as e:
+                        print('Failed to set input default value')
+                        print(e)
+
+            out_dv = stored_ns_node.pop('out_dv', None)
+            if out_dv is not None:
+                for i in out_dv:
+                    v = out_dv[i]
+                    try:
+                        created_blender_node.outputs[int(i)].default_value = v
+                    except Exception as e:
+                        print('Failed to set output default value')
+                        print(e)
+
+            outputs = stored_ns_node.pop('outputs', None)
+            if outputs is not None:
+                to_link.append({name: outputs})
+
+            color_ramp = stored_ns_node.pop('color_ramp', None)
+            if color_ramp is not None:
+                elements = color_ramp['elements']
+                created_blender_node.color_ramp.color_mode = color_ramp['color_mode']
+                created_blender_node.color_ramp.hue_interpolation = color_ramp['hue_interpolation']
+                created_blender_node.color_ramp.interpolation = color_ramp['interpolation']
+                i = 0
+                for p, c in elements.items():
+                    if i > 1:
+                        new_cr_ele = created_blender_node.color_ramp.elements.new(position=float(p))
+                        new_cr_ele.color = c
+                    else:
+                        created_blender_node.color_ramp.elements[i].position = float(p)
+                        created_blender_node.color_ramp.elements[i].color = c
+                    i += 1
+
+            mapping = stored_ns_node.pop('mapping', None)
+            if mapping is not None:
+                curves = mapping.pop('curves')
+                for idc, curve in curves.items():
+                    for idp, point in curve.items():
+                        if int(idp) > 1:
+                            created_blender_node.mapping.curves[int(idc)].points.new(point[0], point[1])
+                        else:
+                            created_blender_node.mapping.curves[int(idc)].points[int(idp)].location = point
+
+                while len(mapping) > 0:
+                    key, v = mapping.popitem()
+                    try:
+                        setattr(created_blender_node.mapping, key, v)
+                    except Exception as e:
+                        print('failed to set mapping attribute: ' + str(key))
+                        print(e)
+
+            parent = stored_ns_node.pop('parent', None)
+            if parent is not None:
+                to_parent[name] = parent
+
+            while len(stored_ns_node) > 0:
+                key, v = stored_ns_node.popitem()
+                try:
+                    setattr(created_blender_node, key, v)
+                except Exception as e:
+                    print('failed to set attribute: ' + str(key))
+                    print(e)
+
+        for l in to_link:
+            key, v = l.popitem()
+
+            for output, targets in v.items():
+                for name, ids in targets.items():
+                    input_ids = []
+                    if isinstance(ids, int):  # ids can be int or list.
+                        input_ids.append(ids)  # This is the very first backwards compatabilty compromise!
+                    else:
+                        input_ids.extend(ids)
+                    for i in input_ids:
+                        try:
+                            # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
+                            if is_material:
+                                bpy.data.materials[self.b_mat_name_actual].node_tree.links.new(
+                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].outputs[
+                                        int(output)],
+                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[
+                                        b_node_names[name]].inputs[i])  # test
+                            elif is_nodegroup:
+                                bpy.data.node_groups[nt_parent_name].links.new(
+                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
+                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
+                        except Exception as e:
+                            print('Failed to link')
+                            print(e)
+
+        for key, v in to_parent.items():
+            try:
+                if is_material:
+                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].parent = \
+                        bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[v]]
+                elif is_nodegroup:
+                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].parent = \
+                        bpy.data.node_groups[nt_parent_name].nodes[b_node_names[v]]
+                # Location of the frame, if shrink is active, depends on the location of the nodes parented to the frame
+                # but the location of the nodes parented to the frame depends on the location of the frame
+                # the end result is that the frame does not appear in correct position as when copied
+                # tasking the location of a node and re-applying it after parenting to a frame does not solve the issue
+            except Exception as e:
+                print('Failed to parent node')
+                print(e)
 
 
 class NS_material(NS_nodetree):
@@ -706,8 +883,28 @@ class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
     bl_label = "Load Nodetree from File"
     bl_options = {'REGISTER'}
     
+    """
+        Constructs a node tree
+        :param nt_parent_name: name of node tree parent, either material or node group
+        :param is_nodegroup: bool is node group
+        :param ns_nodes: node sharer dict
+        :param nt: Blender node tree
+        :param is_material: bool is material
+        """
+    
+    def execute(self, context):
+        # Get our node tree
+        editor_node_tree = context.space_data.edit_tree
+        # make sure we have a node tree open in the editor
+        if (editor_node_tree != None):
+            my_node_tree = NS_nodetree(editor_node_tree.nodes)
+            my_node_tree.construct(my_node_tree._nodes, editor_node_tree,
+                        bpy.data.node_groups[0], #FIX THIS SO IT'S ACTUALLY THE NODETREE'S NAME
+                       is_material=False, is_nodegroup=True)
+        
+    
 class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
-    """Node Sharer: Saves this node tree to a JSON file"""
+    """Node Sharer: Saves this node tree to a JSON file"""a
     bl_idname = "node.ns_save_nodetree_to_file"
     bl_label = "Save Nodetree to File"
     bl_options = {'REGISTER'}
