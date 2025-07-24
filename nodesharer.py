@@ -73,22 +73,27 @@ class NS_node:
         # Store the node properties into self.properties,
         #  self.pass_through is used in case this node is actually a node tree with more
         #  nodes inside it
-        self.pass_through = self.storenode()
+        self.nodetree_inside_node = self.storenode()
         self.name = self.properties['name']
 
     def storenode(self):
-        """Store a node's properties"""
+        """Store a node's properties - returns the sub-tree
+            if this node is actually a sub-tree as an NS_group
+        """
         to_return = None
         tmp_prop = {}
+        # fill the dict tmp_prop with all the node's properties
         for attr in dir(self.node):
 #            print(attr, end=" : ")  #DEBUG
+            # No idea why this is wrapped like this,
+            #  but don't see the harm?
             if hasattr(self.node, attr):
 #                print(attr) #DEBUG
                 tmp_prop[attr] = getattr(self.node, attr)
 #            else: #DEBUG
 #                print("!!!!!!!!!!!!!!!!!") #DEBUG
 
-        for k in tmp_prop:  # for key in node values
+        for k in tmp_prop:  # for key in node properties
             if k in self._prop_common:
                 if k == 'inputs':
                     tmp_inputs = {}
@@ -242,19 +247,21 @@ class NS_nodetree:
         # Material copy uses this blank and fills it itself,
         #  but we can instantiate it with blender node tree data
         if (blender_node_tree != None):
-            self.get_nodes(blender_node_tree)
+            self.populate_nodetree(blender_node_tree)
 
     def add_node(self, node):
         """Add node to node tree"""
         n = NS_node(node)
         self._nodes[n.name] = n
 
-        if n.pass_through is not None:
-            k, v = n.pass_through.popitem()
+        # A node can be an entire node tree itself, if it is,
+        #  add the node tree 
+        if n.nodetree_inside_node is not None:
+            k, v = n.nodetree_inside_node.popitem()
             self.groups[k] = v
     
     
-    def get_nodes(self, blender_node_tree):
+    def populate_nodetree(self, blender_node_tree):
         """Fill the NS_nodetree from blender data"""
         for node in blender_node_tree:
             self.add_node(node)
@@ -288,20 +295,21 @@ class NS_nodetree:
         #print('JSON dump of nodes')
         return self.dumps_json(self._nodes)
     
-    def construct(self, ns_nodes, nt, nt_parent_name, is_material=False, is_nodegroup=False):
+    def construct(self, ns_nodes, blender_node_tree, nt_parent_name, is_material=False, is_nodegroup=False):
         """
         Constructs a node tree
         :param nt_parent_name: name of node tree parent, either material or node group
         :param is_nodegroup: bool is node group
         :param ns_nodes: node sharer dict
-        :param nt: Blender node tree
+        :param blender_node_tree: Blender node tree to put the nodes into
         :param is_material: bool is material
         """
         # b_nodes = nt.nodes  # original
         to_link = []
         to_parent = {}
         b_node_names = {}  # Node sharer name: blender actual name
-
+        
+        # Find the node tree that is open in the editor
         if is_material:
             b_nodes = bpy.data.materials[self.b_mat_name_actual].node_tree.nodes
         elif is_nodegroup:
@@ -314,7 +322,8 @@ class NS_nodetree:
         if is_material is True:
             for node_to_remove in b_nodes:
                 b_nodes.remove(node_to_remove)
-
+                
+        # Look at the nodes in ns_nodes, and make nodes in our blender node graph
         for key in ns_nodes:
             print('Constructing node:' + key + '\n')
 
@@ -419,7 +428,9 @@ class NS_nodetree:
                 except Exception as e:
                     print('failed to set attribute: ' + str(key))
                     print(e)
-
+                    
+        
+        # Now link together our nodes in the blender node graph
         for l in to_link:
             key, v = l.popitem()
 
@@ -446,7 +457,8 @@ class NS_nodetree:
                         except Exception as e:
                             print('Failed to link')
                             print(e)
-
+        
+        # And set up our parent/child relationships of the nodes on the blender node graph
         for key, v in to_parent.items():
             try:
                 if is_material:
@@ -472,14 +484,14 @@ class NS_material(NS_nodetree):
         self._mat = mat
         self.name = self._mat.name
         self.groups.clear()
-        self.get_nodes(self._mat.node_tree.nodes)
+        self.populate_nodetree(self._mat.node_tree.nodes)
         self.ns_mat = {'name': self.name,
                        'type': 'material',
                        'nodes': self._nodes}
         if self.groups != {}:
             self.ns_mat['groups'] = self.groups
 
-    def get_nodes(self):
+    def populate_nodetree(self):
         for node in self._mat.node_tree.nodes:
             self.add_node(node)
 
@@ -524,9 +536,9 @@ class NS_group(NS_nodetree):
         self._nt = nodetree
         self.properties = {}
 
-        self.get_nodes()
+        self.populate_nodetree()
 
-    def get_nodes(self):
+    def populate_nodetree(self):
         for node in self._nt.nodes:
             self.add_node(node)
 
@@ -543,6 +555,9 @@ class NS_group(NS_nodetree):
 
 class NS_mat_constructor(NS_nodetree):
     """Constructs a material nodetree"""
+    """ It works by uncompressing the JSON string,
+        then it stores that into the dictionary ns_nodes.
+    """
 
     def __init__(self, b64_string):
         """
@@ -883,6 +898,8 @@ class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
     bl_label = "Load Nodetree from File"
     bl_options = {'REGISTER'}
     
+    # Function signature for the construct method
+    #def construct(self, ns_nodes, nt, nt_parent_name, is_material=False, is_nodegroup=False):   
     """
         Constructs a node tree
         :param nt_parent_name: name of node tree parent, either material or node group
@@ -904,7 +921,7 @@ class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
         
     
 class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
-    """Node Sharer: Saves this node tree to a JSON file"""a
+    """Node Sharer: Saves this node tree to a JSON file"""
     bl_idname = "node.ns_save_nodetree_to_file"
     bl_label = "Save Nodetree to File"
     bl_options = {'REGISTER'}
