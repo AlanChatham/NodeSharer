@@ -79,8 +79,8 @@ class NS_node:
         self.blender_source_node = node
 
         # Store the node properties into self.properties,
-        #  self.pass_through is used in case this node is actually a node tree with more
-        #  nodes inside it
+        #  self.nodetree_inside_node is used in case this
+        #  node is actually a node tree with more nodes inside it
         self.nodetree_inside_node = self.store_blender_node_properties()
         self.name = self.properties['name']
 
@@ -256,6 +256,13 @@ class NS_nodetree:
         #  but we can instantiate it with blender node tree data
         if (blender_node_tree != None):
             self.populate_nodetree(blender_node_tree)
+            self.name = blender_node_tree.name
+            self.type = blender_node_tree.type
+            """
+            working on stuff here, refactoring so the
+            data is held not directly, but
+            self._data 
+            """
 
     def add_node(self, blender_node):
         """Add node to this NS_nodetree from a blender node object"""
@@ -291,7 +298,7 @@ class NS_nodetree:
         # pprint.pprint(self._nodes)
         # print('\n')
 
-    def dumps_json(self, d):
+    def dumps_JSON(self, d):
         """Indented SON for viewing"""
         # for node in self._nodes:
         #     print(node.toJSON())
@@ -302,9 +309,17 @@ class NS_nodetree:
         return json.dumps(d, separators=(',', ':'), default=lambda o: o.properties)
         # return json.dumps(d, separators=(',', ':'), default=lambda o: o.toJSON())
 
-    def dumps_node_JSON(self):
+    def dumps_nodetree_JSON(self):
+        # All trees have name, type, and nodes
+        nodetree_json = {'name': self.name,
+                         'type': self.type,
+                         'nodes': self._nodes}
+        # If a tree contains node groups (subtrees), add those too
+        if self.groups != {}:
+            nodetree_json['groups'] = self.groups
+
         #print('JSON dump of nodes')
-        return self.dumps_json(self._nodes)
+        return self.dumps_JSON(nodetree_json)
     
     def construct(self, ns_nodes, blender_node_tree, nt_parent_name, is_material=False, is_nodegroup=False):
         """
@@ -489,7 +504,8 @@ class NS_nodetree:
 
 class NS_material(NS_nodetree):
     """Stores a material and its nodes"""
-
+    """ Weird in that it stores data both as member variables
+        but also as the member dictionary ns_mat"""
     def __init__(self, mat):
         super().__init__()
         self._mat = mat
@@ -504,7 +520,7 @@ class NS_material(NS_nodetree):
 
     def dumps_mat_JSON(self):
         print('JSON dump of material')
-        return self.dumps_json(self.ns_mat)
+        return self.dumps_JSON(self.ns_mat)
 
     def dump_mat_JSON(self):
         """Un indented JSON for compression"""
@@ -578,6 +594,7 @@ class NS_mat_constructor(NS_nodetree):
         if str(self.prefix[:2]) != 'NS':
             return
 
+        # uncompressed is a dictionary object, not a string
         self.uncompressed = self.uncompress(b64_string.split('!')[1])
         # ns_ = Node Sharer
         self.ns_nodes = self.uncompressed['nodes']
@@ -588,6 +605,7 @@ class NS_mat_constructor(NS_nodetree):
         self.ns_mat_name = self.uncompressed['name']
         self.ns_groups = self.uncompressed.pop('groups', None)
 
+        # Create a new material in blender
         # b_ = blender
         self.b_mat = bpy.data.materials.new(name=self.ns_mat_name)
         self.b_mat_name_actual = self.b_mat.name
@@ -863,7 +881,7 @@ class OBJECT_MT_ns_export_material(bpy.types.Operator):
                 my_node_tree.add_node(node)
                 print("Added node")
                 
-            json_string = my_node_tree.dumps_node_JSON()
+            json_string = my_node_tree.dumps_nodetree_JSON()
             bpy.context.window_manager.clipboard = json_string
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
@@ -971,7 +989,7 @@ class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
             my_node_tree = NS_nodetree(editor_node_tree.nodes)
             
             with open( self.filepath, "w") as file:
-                file.write(my_node_tree.dumps_node_JSON())
+                file.write(my_node_tree.dumps_nodetree_JSON())
             print("finished")
         else:
             print("No node tree available, has the context changed?")
