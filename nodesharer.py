@@ -321,13 +321,12 @@ class NS_nodetree:
         #print('JSON dump of nodes')
         return self.dumps_JSON(nodetree_json)
     
-    def construct(self, ns_nodes, blender_node_tree, nt_parent_name, is_material=False, is_nodegroup=False):
+    def construct(self, ns_nodes, nt_parent_name, is_material=False, is_nodegroup=False):
         """
         Constructs a node tree
         :param nt_parent_name: name of node tree parent, either material or node group
         :param is_nodegroup: bool is node group
         :param ns_nodes: node sharer dict
-        :param blender_node_tree: Blender node tree to put the nodes into
         :param is_material: bool is material
         """
         # b_nodes = nt.nodes  # original
@@ -627,7 +626,7 @@ class NS_mat_constructor(NS_nodetree):
             for b_grp in self._created_groups:
                 try:
                     # self.construct(self.ns_groups[grp], group)
-                    self.construct(self.ns_groups[b_grp], bpy.data.node_groups[self._created_groups[b_grp]],
+                    self.construct(self.ns_groups[b_grp],
                                    self._created_groups[b_grp], is_nodegroup=True)  # causes crash when linking
                 except Exception as e:
                     print('Constructing node group node tree failed')
@@ -636,7 +635,7 @@ class NS_mat_constructor(NS_nodetree):
         # Construct material node tree
         # self.construct(self.ns_nodes, self.b_mat.node_tree, is_material=True)  # Original
 
-        self.construct(self.ns_nodes, bpy.data.materials[self.b_mat_name_actual].node_tree, self.b_mat_name_actual,
+        self.construct(self.ns_nodes, self.b_mat_name_actual,
                        is_material=True)
 
     def uncompress(self, s):
@@ -657,13 +656,12 @@ class NS_mat_constructor(NS_nodetree):
         except Exception as e:
             print(e)
 
-    def construct(self, ns_nodes, nt, nt_parent_name, is_material=False, is_nodegroup=False):
+    def construct(self, ns_nodes, nt_parent_name, is_material=False, is_nodegroup=False):
         """
         Constructs a node tree
         :param nt_parent_name: name of node tree parent, either material or node group
         :param is_nodegroup: bool is node group
         :param ns_nodes: node sharer dict
-        :param nt: Blender node tree
         :param is_material: bool is material
         """
         # b_nodes = nt.nodes  # original
@@ -943,9 +941,9 @@ class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
         # make sure we have a node tree open in the editor
         if (editor_node_tree != None):
             my_node_tree = NS_nodetree(editor_node_tree.nodes)
-            my_node_tree.construct(my_node_tree._nodes, editor_node_tree,
-                        bpy.data.node_groups[0], #FIX THIS SO IT'S ACTUALLY THE NODETREE'S NAME
-                       is_material=False, is_nodegroup=True)
+#            my_node_tree.construct(my_node_tree._nodes,
+#                        bpy.data.node_groups[0], #FIX THIS SO IT'S ACTUALLY THE NODETREE'S NAME
+#                       is_material=False, is_nodegroup=True)
         
     
 class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
