@@ -22,15 +22,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-import bpy
+import bpy # type: ignore
 import pprint
 import json
 import inspect
 import zlib
 import base64
 import os
-from bpy.props import StringProperty, BoolProperty
-from bpy_extras.io_utils import ImportHelper, ExportHelper
+from bpy.props import StringProperty, BoolProperty # type: ignore
+from bpy_extras.io_utils import ImportHelper, ExportHelper # type: ignore
 
 # from . import compfixer
 
@@ -958,7 +958,7 @@ class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
         subtype='FILE_NAME'
         # subtype='DIR_PATH' is not needed to specify the selection mode.
         # But this will be anyway a directory path.
-        )
+        ) # type: ignore
     
     
     filepath: StringProperty(
@@ -967,7 +967,7 @@ class OBJECT_MT_ns_save_nodetree_to_file(bpy.types.Operator):
         subtype='FILE_PATH'
         # subtype='DIR_PATH' is not needed to specify the selection mode.
         # But this will be anyway a directory path.
-        ) 
+        )  # type: ignore
     @classmethod
     def poll(cls, context):
         return context.object is not None
