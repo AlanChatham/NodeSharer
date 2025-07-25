@@ -257,7 +257,7 @@ class NS_nodetree:
         if (blender_node_tree != None):
             self.populate_nodetree(blender_node_tree)
             self.name = blender_node_tree.name
-            self.type = blender_node_tree.type
+            self.nodetree_type = blender_node_tree.bl_idname
             """
             working on stuff here, refactoring so the
             data is held not directly, but
@@ -312,7 +312,7 @@ class NS_nodetree:
     def dumps_nodetree_JSON(self):
         # All trees have name, type, and nodes
         nodetree_json = {'name': self.name,
-                         'type': self.type,
+                         'type': self.nodetree_type,
                          'nodes': self._nodes}
         # If a tree contains node groups (subtrees), add those too
         if self.groups != {}:
@@ -344,7 +344,9 @@ class NS_nodetree:
             print('Did not specify material or node group')
             return
 
-        # remove stock BSDF and output if creating a material
+        # Remove all the existing nodes in the current node tree,
+        #  so that there's a blank sheet to add our new nodes to
+        #  old comment: remove stock BSDF and output if creating a material
         if is_material is True:
             for node_to_remove in b_nodes:
                 b_nodes.remove(node_to_remove)
