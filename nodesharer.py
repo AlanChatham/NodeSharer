@@ -502,10 +502,6 @@ class NS_material(NS_nodetree):
         if self.groups != {}:
             self.ns_mat['groups'] = self.groups
 
-    def populate_nodetree(self):
-        for node in self._mat.node_tree.nodes:
-            self.add_node(node)
-
     def dumps_mat_JSON(self):
         print('JSON dump of material')
         self.dumps_json(self.ns_mat)
