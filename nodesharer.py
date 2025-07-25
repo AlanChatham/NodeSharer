@@ -49,8 +49,16 @@ def dump(obj):
 
 
 class NS_node:
-    """Stores a node, in preparation for JSONifying or before being added to a node tree"""
+    """Stores a node
+        Member variables:
+            self.properties - a dict of property-value pairs, like "location" -> dict of location data
+            self.blender_source_node - a blender node object
+            self.nodetree_inside_node - None, unless this is a node that contains another tree
+            self.name - the name of the node
+        Used in preparation for JSONifying or before being added to a node tree"""
 
+    # Blender nodes have a lot of data, and we only want some of it,
+    #  these lists help us only save what is relevant 
     _prop_common = ('name', 'bl_idname', 'inputs', 'outputs', 'location')  # always saved properties
 
     _prop_optional = {'hide': False, 'label': '', 'mute': False, 'parent': None, 'select': False, 'show_options': True,
@@ -68,28 +76,28 @@ class NS_node:
 
     def __init__(self, node, *args, **kwargs):
         self.properties = {}
-        self.node = node
+        self.blender_source_node = node
 
         # Store the node properties into self.properties,
         #  self.pass_through is used in case this node is actually a node tree with more
         #  nodes inside it
-        self.nodetree_inside_node = self.storenode()
+        self.nodetree_inside_node = self.store_blender_node_properties()
         self.name = self.properties['name']
 
-    def storenode(self):
-        """Store a node's properties - returns the sub-tree
+    def store_blender_node_properties(self):
+        """Store a node's properties  - returns the sub-tree
             if this node is actually a sub-tree as an NS_group
         """
         to_return = None
         tmp_prop = {}
         # fill the dict tmp_prop with all the node's properties
-        for attr in dir(self.node):
+        for attr in dir(self.blender_source_node):
 #            print(attr, end=" : ")  #DEBUG
             # No idea why this is wrapped like this,
             #  but don't see the harm?
-            if hasattr(self.node, attr):
+            if hasattr(self.blender_source_node, attr):
 #                print(attr) #DEBUG
-                tmp_prop[attr] = getattr(self.node, attr)
+                tmp_prop[attr] = getattr(self.blender_source_node, attr)
 #            else: #DEBUG
 #                print("!!!!!!!!!!!!!!!!!") #DEBUG
 
@@ -97,7 +105,7 @@ class NS_node:
             if k in self._prop_common:
                 if k == 'inputs':
                     tmp_inputs = {}
-                    for index, node_inputs in enumerate(self.node.inputs):
+                    for index, node_inputs in enumerate(self.blender_source_node.inputs):
                         # key = '' + str(idx)
                         key = index
                         try:
@@ -115,7 +123,7 @@ class NS_node:
                 elif k == 'outputs':
                     tmp_outputs = {}
                     output_default_value = {}
-                    for index, node_outputs in enumerate(self.node.outputs):
+                    for index, node_outputs in enumerate(self.blender_source_node.outputs):
                         # key = '' + str(idx)
                         key = index
                         try:
@@ -249,9 +257,9 @@ class NS_nodetree:
         if (blender_node_tree != None):
             self.populate_nodetree(blender_node_tree)
 
-    def add_node(self, node):
-        """Add node to node tree"""
-        n = NS_node(node)
+    def add_node(self, blender_node):
+        """Add node to this NS_nodetree from a blender node object"""
+        n = NS_node(blender_node)
         self._nodes[n.name] = n
 
         # A node can be an entire node tree itself, if it is,
@@ -267,6 +275,9 @@ class NS_nodetree:
             self.add_node(node)
 
     def make_dict(self):
+        """Returns a dictionary of all the nodetree's nodes
+            as (NS_node)node -> (dict)node property dictionary pairs
+        """
         tmp_dict = {}
         for nk, nv in self._nodes.items():
             tmp_dict[nk] = nv.properties
@@ -554,7 +565,8 @@ class NS_group(NS_nodetree):
 
 
 class NS_mat_constructor(NS_nodetree):
-    """Constructs a material nodetree"""
+    """NS_nodetree subclass, stores material meta and nodetree data,
+        used when importing from JSON"""
     """ It works by uncompressing the JSON string,
         then it stores that into the dictionary ns_nodes.
     """
@@ -813,8 +825,8 @@ class OBJECT_MT_ns_copy_material(bpy.types.Operator):
 
     def execute(self, context):  # execute() is called when running the operator.
         
-        #my_mat = NS_material(context.material)
-        my_mat = NS_material(context.space_data.edit_tree)
+        my_mat = NS_material(context.material)
+#        my_mat = NS_material(context.space_data.edit_tree)
         print("here is text2")
         my_mat.print_tree()
         ns_string, length = my_mat.compress()
@@ -987,9 +999,9 @@ def menu_func(self, context):
     self.layout.operator(OBJECT_MT_ns_copy_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_export_material.bl_idname)
     self.layout.operator(OBJECT_MT_ns_paste_material.bl_idname)
-    self.layout.operator(OBJECT_MT_ns_unregister_addon.bl_idname)
     self.layout.operator(OBJECT_MT_ns_save_nodetree_to_file.bl_idname)
     self.layout.operator(OBJECT_MT_ns_load_nodetree_from_file.bl_idname)
+    self.layout.operator(OBJECT_MT_ns_unregister_addon.bl_idname)
     
 
 
