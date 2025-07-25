@@ -271,7 +271,7 @@ class NS_nodetree:
     
     def populate_nodetree(self, blender_node_tree):
         """Fill the NS_nodetree from blender data"""
-        for node in blender_node_tree:
+        for node in blender_node_tree.nodes:
             self.add_node(node)
 
     def make_dict(self):
@@ -495,7 +495,7 @@ class NS_material(NS_nodetree):
         self._mat = mat
         self.name = self._mat.name
         self.groups.clear()
-        self.populate_nodetree(self._mat.node_tree.nodes)
+        self.populate_nodetree(self._mat.node_tree)
         self.ns_mat = {'name': self.name,
                        'type': 'material',
                        'nodes': self._nodes}
@@ -504,7 +504,7 @@ class NS_material(NS_nodetree):
 
     def dumps_mat_JSON(self):
         print('JSON dump of material')
-        self.dumps_json(self.ns_mat)
+        return self.dumps_json(self.ns_mat)
 
     def dump_mat_JSON(self):
         """Un indented JSON for compression"""
@@ -850,21 +850,21 @@ class OBJECT_MT_ns_export_material(bpy.types.Operator):
             my_mat = NS_material(context.material)
 #        my_mat = NS_material(context.space_data.edit_tree) #DEBUG
         #my_mat.print_tree()
-            jsonString = my_mat.dump_mat_JSON()
-            print("jsonString type: {}".format(type(jsonString)))
-            bpy.context.window_manager.clipboard = jsonString
+            json_string = my_mat.dumps_mat_JSON()
+            print("jsonString type: {}".format(type(json_string)))
+            bpy.context.window_manager.clipboard = json_string
         #text = 'yyyCopied material as Node Sharer text string to clipboard. Text length: '
         #self.report({'INFO'}, text)
         else:
             print("We were in a different node editor")
             editor_node_tree = context.space_data.edit_tree
-            my_node_tree = NS_nodetree()
+            my_node_tree = NS_nodetree(editor_node_tree)
             for node in editor_node_tree.nodes:
                 my_node_tree.add_node(node)
                 print("Added node")
-            print("JSON: ")
-            print(my_node_tree.dumps_node_JSON())
-            print("over")
+                
+            json_string = my_node_tree.dumps_node_JSON()
+            bpy.context.window_manager.clipboard = json_string
 
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
 
