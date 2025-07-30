@@ -247,22 +247,89 @@ class NS_node:
 
 class NS_nodetree:
     """stores NS_nodes's"""
-
+    #TODO: figure out what can be extracted from NS_material
+    #      to generalize that
+    #      Also probably wrap all of NS_mat_constructor in here?
     groups = {}
 
-    def __init__(self, blender_node_tree = None):
+    def __init__(self, blender_nodetree = None):
+        # some data members, filled out by constructor methods
+        self.name = None
+        self.nodetree_type = None
         self._nodes = {}
-        # Material copy uses this blank and fills it itself,
-        #  but we can instantiate it with blender node tree data
-        if (blender_node_tree != None):
-            self.populate_nodetree(blender_node_tree)
-            self.name = blender_node_tree.name
-            self.nodetree_type = blender_node_tree.bl_idname
-            """
-            working on stuff here, refactoring so the
-            data is held not directly, but
-            self._data 
-            """
+        self.groups = {}
+        if (blender_nodetree != None):
+            self.construct_from_blender_nodetree(blender_nodetree)
+        
+
+    def construct_from_blender_nodetree(self, blender_nodetree : str):
+        self.name = blender_nodetree.name
+        self.nodetree_type = blender_nodetree.bl_idname 
+        self._nodes = {}
+        self.populate_nodetree(blender_nodetree)
+        
+
+    def construct_from_JSON(self, JSON_input):
+        # Get our JSON data into an object
+        input_data = json.loads(JSON_input)
+        # We could probably load this directly in, but this
+        #  explicitly sets the class variables from the JSON data
+        self.name = input_data.get("name")
+        self.type = input_data.get("type")
+        self._nodes = input_data.get("nodes")
+        self.groups = input_data.get("groups")
+        self.create_full_blender_nodetree()
+
+
+    def create_full_blender_nodetree(self):
+        # this function can't handle material
+        if (self.type == "MATERIAL") or (self.type == "ShaderNodeTree"):
+            print("This function can't handle materials, try NS_mat_constructor")
+        
+        # Check for deprecated use of nodetree.type instead of .bl_idname
+        if (self.type == "GEOMETRY"):
+            self.type = "GeometryNodeTree"
+        if (self.type == "COMPOSITING"):
+            self.type = "CompositorNodeTree"
+        if (self.type == "SHADER"):
+            self.type = "ShaderNodeTree"
+        if (self.type == "TEXTURE"):
+            self.type = "TextureNodeTree"
+        # Create a new node tree in blender and keep a reference to the data
+        # b_ = blender
+        self.b_nodeTree = bpy.data.node_groups.new(self.name, self.type)
+        # Try to get it to show up to the top level editor
+        self.b_nodeTree.is_modifier = True
+        self.b_nodeTree_name_actual = self.b_nodeTree.name
+        self.b_nodes = self.b_nodeTree.nodes
+
+        self._created_nodes = []
+        self._created_groups = {}
+
+        # Construct groups first
+        if self.groups is not None:
+            print("Constructing groups")
+            # NS_groups are only for nodetree info, not group and metadata info
+            ns_grp : NS_group  
+            for ns_grp in self.groups:
+                print('Constructing group:' + ns_grp + '\n')
+                b_group = bpy.data.node_groups.new(ns_grp, self.type)
+                self._created_groups[ns_grp] = b_group.name
+                # self._created_groups[grp] = group
+            for b_grp in self._created_groups:
+                try:
+                    # self.construct(self.ns_groups[grp], group)
+                    self.create_blender_nodes(self.groups[b_grp],
+                                   self._created_groups[b_grp], is_nodegroup=True)  # causes crash when linking
+                except Exception as e:
+                    print('Constructing node group node tree failed')
+                    print(e)
+        else:
+            print ("Didn't find groups to construct")
+
+        # Now construct the node tree
+        self.create_blender_nodes(self._nodes, self.b_nodeTree_name_actual, is_nodegroup = True)
+        
 
     def add_node(self, blender_node):
         """Add node to this NS_nodetree from a blender node object"""
@@ -321,13 +388,14 @@ class NS_nodetree:
         #print('JSON dump of nodes')
         return self.dumps_JSON(nodetree_json)
     
-    def construct(self, ns_nodes, nt_parent_name, is_material=False, is_nodegroup=False):
+
+    def create_blender_nodes(self, ns_nodes, nt_parent_name, is_nodegroup=False):
         """
         Constructs a node tree
+        :param ns_nodes: node sharer dict
         :param nt_parent_name: name of node tree parent, either material or node group
         :param is_nodegroup: bool is node group
-        :param ns_nodes: node sharer dict
-        :param is_material: bool is material
+        
         """
         # b_nodes = nt.nodes  # original
         to_link = []
@@ -335,18 +403,13 @@ class NS_nodetree:
         b_node_names = {}  # Node sharer name: blender actual name
         
         # Find the node tree that is open in the editor
-        if is_material:
-            b_nodes = bpy.data.materials[self.b_mat_name_actual].node_tree.nodes
-        elif is_nodegroup:
-            b_nodes = bpy.data.node_groups[nt_parent_name].nodes
-        else:
-            print('Did not specify material or node group')
-            return
+        b_nodes = bpy.data.node_groups[nt_parent_name].nodes
+        
 
         # Remove all the existing nodes in the current node tree,
         #  so that there's a blank sheet to add our new nodes to
         #  old comment: remove stock BSDF and output if creating a material
-        if is_material is True:
+        if is_nodegroup is False:
             for node_to_remove in b_nodes:
                 b_nodes.remove(node_to_remove)
                 
@@ -356,8 +419,8 @@ class NS_nodetree:
 
             stored_ns_node = ns_nodes[key]
 
-            bl_idname = stored_ns_node.pop('bl_idname')
-            name = stored_ns_node.pop('name')
+            bl_idname = stored_ns_node.get('bl_idname')
+            name = stored_ns_node.get('name')
 
             # if is_material is True:
             # if True:
@@ -471,16 +534,9 @@ class NS_nodetree:
                     for i in input_ids:
                         try:
                             # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
-                            if is_material:
-                                bpy.data.materials[self.b_mat_name_actual].node_tree.links.new(
-                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].outputs[
-                                        int(output)],
-                                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[
-                                        b_node_names[name]].inputs[i])  # test
-                            elif is_nodegroup:
-                                bpy.data.node_groups[nt_parent_name].links.new(
-                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
-                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
+                            bpy.data.node_groups[nt_parent_name].links.new(
+                                bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
+                                bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
                         except Exception as e:
                             print('Failed to link')
                             print(e)
@@ -488,12 +544,8 @@ class NS_nodetree:
         # And set up our parent/child relationships of the nodes on the blender node graph
         for key, v in to_parent.items():
             try:
-                if is_material:
-                    bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[key]].parent = \
-                        bpy.data.materials[self.b_mat_name_actual].node_tree.nodes[b_node_names[v]]
-                elif is_nodegroup:
-                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].parent = \
-                        bpy.data.node_groups[nt_parent_name].nodes[b_node_names[v]]
+                bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].parent = \
+                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[v]]
                 # Location of the frame, if shrink is active, depends on the location of the nodes parented to the frame
                 # but the location of the nodes parented to the frame depends on the location of the frame
                 # the end result is that the frame does not appear in correct position as when copied
@@ -616,8 +668,22 @@ class NS_mat_constructor(NS_nodetree):
         self._created_nodes = []
         self._created_groups = {}
 
+
+        # Our data format:
+        #  Metadata
+        #  Main tree nodes
+        #  dict of subtree nodetrees (:NS_group)
+        #  
+        # This way, a top level NS_material or NS_nodetree has
+        #  all the info it needs to create nodes and link them all up
+        #  We store all the subtrees as a dict so that we can connect
+        #  them all, because Blender Group nodes only care about a link
+        #  to a nodetree, so we can construct those without recursion (?)
+        #   HOW DO WE DEAL WITH LINKS TO EXISTING NODES? I don't think we do
         # Construct groups first
         if self.ns_groups is not None:
+            # NS_groups are only for nodetree info, not group and metadata info
+            ns_grp : NS_group  
             for ns_grp in self.ns_groups:
                 print('Constructing group:' + ns_grp + '\n')
                 group = bpy.data.node_groups.new(ns_grp, 'ShaderNodeTree')
@@ -626,7 +692,7 @@ class NS_mat_constructor(NS_nodetree):
             for b_grp in self._created_groups:
                 try:
                     # self.construct(self.ns_groups[grp], group)
-                    self.construct(self.ns_groups[b_grp],
+                    self.constructNodes(self.ns_groups[b_grp],
                                    self._created_groups[b_grp], is_nodegroup=True)  # causes crash when linking
                 except Exception as e:
                     print('Constructing node group node tree failed')
@@ -635,7 +701,7 @@ class NS_mat_constructor(NS_nodetree):
         # Construct material node tree
         # self.construct(self.ns_nodes, self.b_mat.node_tree, is_material=True)  # Original
 
-        self.construct(self.ns_nodes, self.b_mat_name_actual,
+        self.constructNodes(self.ns_nodes, self.b_mat_name_actual,
                        is_material=True)
 
     def uncompress(self, s):
@@ -656,7 +722,7 @@ class NS_mat_constructor(NS_nodetree):
         except Exception as e:
             print(e)
 
-    def construct(self, ns_nodes, nt_parent_name, is_material=False, is_nodegroup=False):
+    def constructNodes(self, ns_nodes, nt_parent_name, is_material=False, is_nodegroup=False):
         """
         Constructs a node tree
         :param nt_parent_name: name of node tree parent, either material or node group
@@ -832,7 +898,7 @@ class NS_mat_constructor(NS_nodetree):
 
 
 class OBJECT_MT_ns_copy_material(bpy.types.Operator):
-    """Node Sharer: Copy complete material node setup as text string"""  # Use this as a tooltip for menu items and buttons.
+    """Node Sharer: Copy complete material node setup as compressed string"""  # Use this as a tooltip for menu items and buttons.
     bl_idname = "node.ns_copy_material"  # Unique identifier for buttons and menu items to reference.
     bl_label = "Copy material as a text string"  # Display name in the interface.
     bl_options = {'REGISTER'}  # 
@@ -857,9 +923,6 @@ class OBJECT_MT_ns_export_material(bpy.types.Operator):
     bl_options = {'REGISTER'}  # 
 
     def execute(self, context):  # execute() is called when running the operator.
-        print("\n")
-        print(dir(context)) #DEBUG
-        print("\n")
         
         # Materials have a bunch of properties outside of just the node tree,
         #  so if we're in the shader editor, we run the original code
@@ -919,7 +982,7 @@ class OBJECT_MT_ns_unregister_addon(bpy.types.Operator):
         return {'FINISHED'}  # Lets Blender know the operator finished successfully.
     
 class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
-    """Node Sharer: Saves this node tree to a JSON file"""
+    """Node Sharer: Loads this node tree to a JSON file"""
     bl_idname = "node.ns_load_nodetree_from_file"
     bl_label = "Load Nodetree from File"
     bl_options = {'REGISTER'}
@@ -934,13 +997,27 @@ class OBJECT_MT_ns_load_nodetree_from_file(bpy.types.Operator):
         :param nt: Blender node tree
         :param is_material: bool is material
         """
-    
-    def execute(self, context):
-        # Get our node tree
-        editor_node_tree = context.space_data.edit_tree
-        # make sure we have a node tree open in the editor
-        if (editor_node_tree != None):
-            my_node_tree = NS_nodetree(editor_node_tree.nodes)
+    def execute(self, context):  # execute() is called when running the operator.
+        print('Paste tree')
+
+        new_tree = NS_nodetree()
+        new_tree.construct_from_JSON(bpy.context.window_manager.clipboard)
+        try:
+            text = 'Pasted material from Node Sharer text string. Tree name: ' + str(new_tree.b_nodeTree_name_actual)
+            level = 'INFO'
+        except AttributeError:
+            text = "Failed to paste material, make sure it\'s an actual Node Sharer text string"
+            level = 'ERROR'
+        self.report({level}, text)
+
+        return {'FINISHED'}  # Lets Blender know the operator finished successfully.
+
+    # def execute(self, context):
+    #     # Get our node tree
+    #     editor_node_tree = context.space_data.edit_tree
+    #     # make sure we have a node tree open in the editor
+    #     if (editor_node_tree != None):
+    #         my_node_tree = NS_nodetree(editor_node_tree.nodes)
 #            my_node_tree.construct(my_node_tree._nodes,
 #                        bpy.data.node_groups[0], #FIX THIS SO IT'S ACTUALLY THE NODETREE'S NAME
 #                       is_material=False, is_nodegroup=True)
