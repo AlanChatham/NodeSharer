@@ -269,68 +269,6 @@ class NS_nodetree:
         self.populate_nodetree(blender_nodetree)
         
 
-    def construct_from_JSON(self, JSON_input):
-        # Get our JSON data into an object
-        input_data = json.loads(JSON_input)
-        # We could probably load this directly in, but this
-        #  explicitly sets the class variables from the JSON data
-        self.name = input_data.get("name")
-        self.type = input_data.get("type")
-        self._nodes = input_data.get("nodes")
-        self.groups = input_data.get("groups")
-        self.create_full_blender_nodetree()
-
-
-    def create_full_blender_nodetree(self):
-        # this function can't handle material
-        if (self.type == "MATERIAL") or (self.type == "ShaderNodeTree"):
-            print("This function can't handle materials, try NS_mat_constructor")
-        
-        # Check for deprecated use of nodetree.type instead of .bl_idname
-        if (self.type == "GEOMETRY"):
-            self.type = "GeometryNodeTree"
-        if (self.type == "COMPOSITING"):
-            self.type = "CompositorNodeTree"
-        if (self.type == "SHADER"):
-            self.type = "ShaderNodeTree"
-        if (self.type == "TEXTURE"):
-            self.type = "TextureNodeTree"
-        # Create a new node tree in blender and keep a reference to the data
-        # b_ = blender
-        self.b_nodeTree = bpy.data.node_groups.new(self.name, self.type)
-        # Try to get it to show up to the top level editor
-        self.b_nodeTree.is_modifier = True
-        self.b_nodeTree_name_actual = self.b_nodeTree.name
-        self.b_nodes = self.b_nodeTree.nodes
-
-        self._created_nodes = []
-        self._created_groups = {}
-
-        # Construct groups first
-        if self.groups is not None:
-            print("Constructing groups")
-            # NS_groups are only for nodetree info, not group and metadata info
-            ns_grp : NS_group  
-            for ns_grp in self.groups:
-                print('Constructing group:' + ns_grp + '\n')
-                b_group = bpy.data.node_groups.new(ns_grp, self.type)
-                self._created_groups[ns_grp] = b_group.name
-                # self._created_groups[grp] = group
-            for b_grp in self._created_groups:
-                try:
-                    # self.construct(self.ns_groups[grp], group)
-                    self.create_blender_nodes(self.groups[b_grp],
-                                   self._created_groups[b_grp], is_nodegroup=True)  # causes crash when linking
-                except Exception as e:
-                    print('Constructing node group node tree failed')
-                    print(e)
-        else:
-            print ("Didn't find groups to construct")
-
-        # Now construct the node tree
-        self.create_blender_nodes(self._nodes, self.b_nodeTree_name_actual, is_nodegroup = True)
-        
-
     def add_node(self, blender_node):
         """Add node to this NS_nodetree from a blender node object"""
         n = NS_node(blender_node)
@@ -388,6 +326,85 @@ class NS_nodetree:
         #print('JSON dump of nodes')
         return self.dumps_JSON(nodetree_json)
     
+    
+    def construct_from_JSON(self, JSON_input):
+        # Get our JSON data into an object
+        input_data = json.loads(JSON_input)
+        # We could probably load this directly in, but this
+        #  explicitly sets the class variables from the JSON data
+        self.name = input_data.get("name")
+        self.type = input_data.get("type")
+        self._nodes = input_data.get("nodes")
+        self.groups = input_data.get("groups")
+        self.create_full_blender_nodetree()
+
+    
+    def create_full_blender_nodetree(self, add_as_independent_tree = False):
+        """
+        :param add_as_independent_tree: True if this should be a top-level data object,
+                                        like a material or a whole Geo Nodes modifier,
+                                        False if it should be created as a group node
+                                        within the current open tree editor 
+        """
+        # this function can't handle material
+        if (self.type == "MATERIAL") or (self.type == "ShaderNodeTree"):
+            print("This function can't handle materials, try NS_mat_constructor")
+        
+        # Check for deprecated use of nodetree.type instead of .bl_idname
+        if (self.type == "GEOMETRY"):
+            self.type = "GeometryNodeTree"
+        if (self.type == "COMPOSITING"):
+            self.type = "CompositorNodeTree"
+        if (self.type == "SHADER"):
+            self.type = "ShaderNodeTree"
+        if (self.type == "TEXTURE"):
+            self.type = "TextureNodeTree"
+        # Create a new node tree in blender and keep a reference to the data
+        # b_ = blender
+        self.b_nodeTree = bpy.data.node_groups.new(self.name, self.type)
+        self.b_nodeTree_name_actual = self.b_nodeTree.name
+        self.b_nodes = self.b_nodeTree.nodes
+
+        if (add_as_independent_tree == True):
+            # Try to get it to show up to the top level editor
+            self.b_nodeTree.is_modifier = True
+        else:
+            # Add this tree as a group node to the current open node editor
+            editor_node_tree = bpy.context.space_data.edit_tree
+            # Get the right node type to create
+            group_node_type = self.type.replace("Tree", "Group")
+            # Create  the node in the current graph
+            group_node = editor_node_tree.nodes.new( group_node_type)
+            # Link it to our data
+            group_node.node_tree = self.b_nodeTree
+
+        self._created_nodes = []
+        self._created_groups = {}
+
+        # Construct groups first
+        if self.groups is not None:
+            print("Constructing groups")
+            # NS_groups are only for nodetree info, not group and metadata info
+            ns_grp : NS_group  
+            for ns_grp in self.groups:
+                print('Constructing group:' + ns_grp + '\n')
+                b_group = bpy.data.node_groups.new(ns_grp, self.type)
+                self._created_groups[ns_grp] = b_group.name
+                # self._created_groups[grp] = group
+            for b_grp in self._created_groups:
+                try:
+                    # self.construct(self.ns_groups[grp], group)
+                    self.create_blender_nodes(self.groups[b_grp],
+                                   self._created_groups[b_grp], is_nodegroup=True)  # causes crash when linking
+                except Exception as e:
+                    print('Constructing node group node tree failed')
+                    print(e)
+        else:
+            print ("Didn't find groups to construct")
+
+        # Now construct the node tree
+        self.create_blender_nodes(self._nodes, self.b_nodeTree_name_actual, is_nodegroup = True)
+        
 
     def create_blender_nodes(self, ns_nodes, nt_parent_name, is_nodegroup=False):
         """
@@ -514,7 +531,11 @@ class NS_nodetree:
             while len(stored_ns_node) > 0:
                 key, v = stored_ns_node.popitem()
                 try:
-                    setattr(created_blender_node, key, v)
+                    # We can check for read only properties,
+                    if (created_blender_node.is_property_readonly(key) == True):
+                        print (" Property ' " + key + " ' was read only, didn't set")
+                    else:
+                        setattr(created_blender_node, key, v)
                 except Exception as e:
                     print('failed to set attribute: ' + str(key))
                     print(e)
@@ -533,10 +554,14 @@ class NS_nodetree:
                         input_ids.extend(ids)
                     for i in input_ids:
                         try:
+                            # groups changed from using node.input / node.output to 
+                            #  using nodegroup.interface
                             # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
                             bpy.data.node_groups[nt_parent_name].links.new(
                                 bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
                                 bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
+                            
+
                         except Exception as e:
                             print('Failed to link')
                             print(e)
