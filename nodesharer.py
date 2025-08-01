@@ -426,15 +426,17 @@ class NS_nodetree:
                         interface_properties[property] = tuple(interface_properties[property])
                         print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
                     except Exception as e:
-                        print("Couldn't save " + property + " on it's own, trying to save it data.name_full")
                         print(e)
+                        print("Couldn't save " + property + " on it's own, trying to save it data.name_full")
+                        
                         try:
                             interface_properties[property] = interface_properties[property].name_full
-                            print("Saved " + property + " as a name, " + interface_properties[property].name_full)
+                            print("Saved " + property + " as a name, " + interface_properties[property])
                         except Exception as e:
+                            print(e)
                             interface_properties[property] = None
                             print("Couldn't save " + property + " as a name, either, so saving it as None")
-                            print(e)
+                            
 
 
                         
