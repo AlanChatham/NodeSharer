@@ -95,6 +95,7 @@ class NS_node:
 #            print(attr, end=" : ")  #DEBUG
             # No idea why this is wrapped like this,
             #  but don't see the harm?
+            ### AHH we do this to make it iterable
             if hasattr(self.blender_source_node, attr):
 #                print(attr) #DEBUG
                 tmp_prop[attr] = getattr(self.blender_source_node, attr)
@@ -108,15 +109,28 @@ class NS_node:
                     for index, node_inputs in enumerate(self.blender_source_node.inputs):
                         # key = '' + str(idx)
                         key = index
-                        try:
+                        # save default values a node has
+                        if hasattr(node_inputs, 'default_value') == False:
+#                            print (node_inputs.name + " has no default")
+                            continue
+                        if node_inputs.default_value == None:
+#                            print (node_outputs.name + " default is None")
+                            continue
+                        if type(node_inputs.default_value) == str:
+                            tmp_inputs[key] = node_inputs.default_value
+                        else:
                             try:
-                                tmp_inputs[key] = round(node_inputs.default_value, 5)
-                            except:
-                                tmp_inputs[key] = tuple(round(tmp_v, 5) for tmp_v in node_inputs.default_value)
-                        except Exception as e:
-                            print('input ' + str(index) + ' not default value')
-                            print(e)
-                            # tmp_inputs[key] = ''
+                                try:
+                                    # default values, like if you manually set a Transform
+                                    #  geo node to specific values, are also inputs/outputs
+                                    tmp_inputs[key] = round(node_inputs.default_value, 5)
+                                except:
+                                    tmp_inputs[key] = tuple(round(tmp_v, 5) for tmp_v in node_inputs.default_value)
+                            except Exception as e:
+    #                            print('input ' + str(index) + ' not default value')
+    #                            print(e)
+                                # tmp_inputs[key] = ''
+                                pass
                     if tmp_inputs != {}:
                         self.properties[k] = tmp_inputs
 
@@ -126,13 +140,30 @@ class NS_node:
                     for index, node_outputs in enumerate(self.blender_source_node.outputs):
                         # key = '' + str(idx)
                         key = index
-                        try:
+                        # save default values a node has
+                        if hasattr(node_outputs, 'default_value') == False:
+                #            print (node_outputs.name + " has no default")
+                            continue
+                        if node_outputs.default_value == None:
+                #            print (node_outputs.name + " default is None")
+                            continue
+                        if type(node_outputs.default_value) == str:
+                            tmp_outputs[key] = node_outputs.default_value
+                        else:
                             try:
-                                output_default_value[key] = round(node_outputs.default_value, 5)
-                            except:
-                                output_default_value[key] = tuple(round(tmp_v, 5) for tmp_v in node_outputs.default_value)
-                        except AttributeError:
-                            pass
+                                try:
+                                    output_default_value[key] = round(node_outputs.default_value, 5)
+                                except:
+                                    print("got here")
+                                    try:
+                                        output_default_value[key] = tuple(round(tmp_v, 5) for tmp_v in node_outputs.default_value)
+                                    except AttributeError:
+                                        print('now here')
+                                        pass
+                            except AttributeError:
+                                print('and lastly here')
+                                pass
+
                         try:
                             # print('Dumping ' + key)
                             if node_outputs.is_linked:
@@ -258,15 +289,21 @@ class NS_nodetree:
         self.nodetree_type = None
         self._nodes = {}
         self.groups = {}
+        # Node trees hold information about their inputs and outputs,
+        #  this used to be held in an input and output dict like a node,
+        #  but in 4.0 they changed this to be in NodeTree.NodeTreeInterface
+        self.interface = None
         if (blender_nodetree != None):
             self.construct_from_blender_nodetree(blender_nodetree)
         
 
-    def construct_from_blender_nodetree(self, blender_nodetree : str):
+    def construct_from_blender_nodetree(self, blender_nodetree : bpy.types.NodeTree):
         self.name = blender_nodetree.name
         self.nodetree_type = blender_nodetree.bl_idname 
         self._nodes = {}
         self.populate_nodetree(blender_nodetree)
+        # Let's just store a reference to the underlying tree's interface
+        self.interface = blender_nodetree.interface
         
 
     def add_node(self, blender_node):
@@ -316,15 +353,96 @@ class NS_nodetree:
 
     def dumps_nodetree_JSON(self):
         # All trees have name, type, and nodes
-        nodetree_json = {'name': self.name,
+        nodetree_dict_to_jsonify = {'name': self.name,
                          'type': self.nodetree_type,
                          'nodes': self._nodes}
         # If a tree contains node groups (subtrees), add those too
         if self.groups != {}:
-            nodetree_json['groups'] = self.groups
-
+            nodetree_dict_to_jsonify['groups'] = self.groups
+        # Add interface data
+        interface_info = self.get_interface_info()
+        if interface_info != {}:
+            nodetree_dict_to_jsonify['interface'] = interface_info
         #print('JSON dump of nodes')
-        return self.dumps_JSON(nodetree_json)
+        return self.dumps_JSON(nodetree_dict_to_jsonify)
+    
+    def get_interface_info(self):
+        """ We're storing a direct link to the blender NodeTreeInterface for this node tree
+                so we need to be able to extract the info we need for reconstruction
+                while not bulking up on useless data, same as we do in add_node, just
+                we're keeping things more dynamic here
+        """
+        # properties to save even when they're the default, which we normally don't save
+        _prop_always_save = ('position')
+        _prop_common_ignored = ('index','rna_type', 'bl_rna', 'bl_socket_idname',
+                                'interface_items')
+        # iterface_items above is where a panel stores it's children
+        #  we already have parent data from each node, so we don't need that
+        
+        interface_dict_to_return = {}
+
+        interface_item : bpy.types.NodeTreeInterfaceItem
+        for interface_item in self.interface.items_tree:
+
+            # Get an iterable dict of our interface item properties
+            interface_properties = {}
+            
+            for attribute in dir(interface_item):
+                # We don't want functions
+                if callable(getattr(interface_item, attribute)):
+                    continue
+                # nor pythonic builtins
+                if attribute[:1] == '_': 
+                    continue
+                # nor some other automatic attributes
+                if attribute in _prop_common_ignored:
+                    continue
+                # nor if it's None
+                if getattr(interface_item, attribute) == None:
+                    # print (attribute + " WAS None, DIDN'T STORE")
+                    continue
+                # and don't store something if it has the default value
+                if attribute not in _prop_always_save:
+                    if hasattr(interface_item.bl_rna.properties[attribute], 'default'):
+                        # print (attribute + " has a default: ", end="")
+                        # print (str(interface_item.bl_rna.properties[attribute].default))
+                        # print ("Is it's value, " + str(getattr(interface_item, attribute)) +
+                        #        ", the same?", end="")
+                        if interface_item.bl_rna.properties[attribute].default == getattr(interface_item, attribute):
+                            continue
+                
+                # else, down here, since all the above blocks end in a continue
+                interface_properties[attribute] = getattr(interface_item, attribute)
+
+            print (interface_properties)
+            # Now do some processing for some special cases
+            for property in interface_properties:
+                # We need to store parents by persistent_uid instead of an object link
+                if property == 'parent':
+                    interface_properties['parent'] = interface_properties['parent'].persistent_uid
+                # Sometimes data comes in a list, like a vector, so deal with that 
+                if not isinstance(interface_properties[property], (int, str, bool, float)):
+                    try:
+                        interface_properties[property] = tuple(interface_properties[property])
+                        print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
+                    except Exception as e:
+                        print("Couldn't save " + property + " on it's own, trying to save it data.name_full")
+                        print(e)
+                        try:
+                            interface_properties[property] = interface_properties[property].name_full
+                            print("Saved " + property + " as a name, " + interface_properties[property].name_full)
+                        except Exception as e:
+                            interface_properties[property] = None
+                            print("Couldn't save " + property + " as a name, either, so saving it as None")
+                            print(e)
+
+
+                        
+                
+            
+            interface_dict_to_return[interface_item.name] = interface_properties
+
+        return interface_dict_to_return
     
     
     def construct_from_JSON(self, JSON_input):
