@@ -302,8 +302,10 @@ class NS_nodetree:
         self.nodetree_type = blender_nodetree.bl_idname 
         self._nodes = {}
         self.populate_nodetree(blender_nodetree)
-        # Let's just store a reference to the underlying tree's interface
-        self.interface = blender_nodetree.interface
+        # Blender 4.0 moved nodegroup sockets to a separate interface object
+        #  so check if that exists, and if so, get the info
+        if hasattr(blender_nodetree, 'interface'):
+            self.get_interface_info_from_blender(blender_nodetree.interface)
         
 
     def add_node(self, blender_node):
@@ -360,29 +362,30 @@ class NS_nodetree:
         if self.groups != {}:
             nodetree_dict_to_jsonify['groups'] = self.groups
         # Add interface data
-        interface_info = self.get_interface_info()
-        if interface_info != {}:
-            nodetree_dict_to_jsonify['interface'] = interface_info
+        if self.interface != None:
+            nodetree_dict_to_jsonify['interface'] = self.interface
         #print('JSON dump of nodes')
         return self.dumps_JSON(nodetree_dict_to_jsonify)
     
-    def get_interface_info(self):
+    def get_interface_info_from_blender(self, blender_nodetree_interface : bpy.types.NodeTreeInterface):
         """ We're storing a direct link to the blender NodeTreeInterface for this node tree
                 so we need to be able to extract the info we need for reconstruction
                 while not bulking up on useless data, same as we do in add_node, just
                 we're keeping things more dynamic here
         """
         # properties to save even when they're the default, which we normally don't save
-        _prop_always_save = ('position')
+        _prop_always_save = ('position', 'name', 'description', 'in_out',
+                             'socket_type')
         _prop_common_ignored = ('index','rna_type', 'bl_rna', 'bl_socket_idname',
                                 'interface_items')
         # iterface_items above is where a panel stores it's children
         #  we already have parent data from each node, so we don't need that
         
-        interface_dict_to_return = {}
+        # Establish a dict for this, since this gets initialized as None type
+        self.interface = {}
 
         interface_item : bpy.types.NodeTreeInterfaceItem
-        for interface_item in self.interface.items_tree:
+        for interface_item in blender_nodetree_interface.items_tree:
 
             # Get an iterable dict of our interface item properties
             interface_properties = {}
@@ -414,37 +417,36 @@ class NS_nodetree:
                 # else, down here, since all the above blocks end in a continue
                 interface_properties[attribute] = getattr(interface_item, attribute)
 
-            print (interface_properties)
+#            print (interface_properties)
             # Now do some processing for some special cases
             for property in interface_properties:
                 # We need to store parents by persistent_uid instead of an object link
                 if property == 'parent':
-                    interface_properties['parent'] = interface_properties['parent'].persistent_uid
+                    interface_properties['parent'] = interface_properties['parent'].index
                 # Sometimes data comes in a list, like a vector, so deal with that 
                 if not isinstance(interface_properties[property], (int, str, bool, float)):
                     try:
                         interface_properties[property] = tuple(interface_properties[property])
-                        print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
+#                        print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
                     except Exception as e:
                         print(e)
                         print("Couldn't save " + property + " on it's own, trying to save it data.name_full")
                         
                         try:
                             interface_properties[property] = interface_properties[property].name_full
-                            print("Saved " + property + " as a name, " + interface_properties[property])
+#                            print("Saved " + property + " as a name, " + interface_properties[property])
                         except Exception as e:
                             print(e)
                             interface_properties[property] = None
                             print("Couldn't save " + property + " as a name, either, so saving it as None")
                             
+            # It's VERY IMPORTANT we save these as their index, otherwise we
+            #  won't have a reasonable way to restore ordering and parenting relationships
+            #  upon loading. It's also the only way to guarantee each item has
+            #  a unique name to store, so we don't overwrite stuff as we save, so that's good too
+            self.interface[interface_item.index] = interface_properties
 
-
-                        
-                
-            
-            interface_dict_to_return[interface_item.name] = interface_properties
-
-        return interface_dict_to_return
+        return
     
     
     def construct_from_JSON(self, JSON_input):
@@ -456,8 +458,16 @@ class NS_nodetree:
         self.type = input_data.get("type")
         self._nodes = input_data.get("nodes")
         self.groups = input_data.get("groups")
+        #if hasattr(input_data, "interface"):
+        self.interface = input_data.get("interface")
+        print(self.name + " Had an interface")
+        #else:
+        #    self.interface = None
+            
+
         self.create_full_blender_nodetree()
 
+    
     
     def create_full_blender_nodetree(self, add_as_independent_tree = False):
         """
@@ -465,6 +475,8 @@ class NS_nodetree:
                                         like a material or a whole Geo Nodes modifier,
                                         False if it should be created as a group node
                                         within the current open tree editor 
+        returns the name of the blender nodetree, since blender python objects are
+          only temporary
         """
         # this function can't handle material
         if (self.type == "MATERIAL") or (self.type == "ShaderNodeTree"):
@@ -484,6 +496,52 @@ class NS_nodetree:
         self.b_nodeTree = bpy.data.node_groups.new(self.name, self.type)
         self.b_nodeTree_name_actual = self.b_nodeTree.name
         self.b_nodes = self.b_nodeTree.nodes
+
+        _props_to_skip = ('name', 'parent', 'index')
+
+        # As of blender 4.0, we also need to create an interface
+        if hasattr(self.b_nodeTree, 'interface') and self.interface != None:
+            # We need to make sure we're sorting this as we make them, since we'll need the index data
+            #  to restore the original ordering and parental relationships
+            # Place for ns_nodetree interface and b_nodetree interface items
+            list_of_interfaces = [0] * len(self.interface)
+            print ("constructing interface for " + self.name)
+
+            for interfaceItem in self.interface.values():  #sorted(steps, key=lambda key: int(key))
+                if interfaceItem['item_type'] == "SOCKET":
+                    created_interfaceItem = self.b_nodeTree.interface.new_socket(interfaceItem['name'])
+                elif interfaceItem['item_type'] == "PANEL":
+                    created_interfaceItem = self.b_nodeTree.interface.new_panel(interfaceItem['name'])
+                else: 
+                    print("Somehow had an interfaceItem that wasn't a socket or panel...")
+                    continue
+
+                for property in interfaceItem:
+                    # skip a few properties we'll do later
+                    if property not in _props_to_skip:
+                        print(interfaceItem['name'] + " has a property " + property + ": " +  interfaceItem[property])
+                        created_interfaceItem[property] = interfaceItem[property]
+                
+                # store the reference for parenting 
+                list_of_interfaces[interfaceItem['index']] = {'ns_interface_item' : interfaceItem, 'b_interface_item' : created_interfaceItem}
+            # Now we have all the interface items instantiated,
+            #  we can set up ordering and parent relationships
+            i = 0
+            while i < len(list_of_interfaces):
+                self.b_nodeTree.interface.move(list_of_interfaces[i]['b_interface_item'], i)
+                i = i + 1
+            i = 0
+            # Set up parents
+            while i < len(list_of_interfaces):
+                ns_item = list_of_interfaces[i]['ns_interface_item']
+                b_item = list_of_interfaces[i]['b_interface_item']
+                parent_index = ns_item['parent']
+                if parent_index != 0:
+                    b_item_parent = list_of_interfaces[parent_index]['b_interface_item']
+                    index_to_move_to = (ns_item['index'] - parent_index) - 1
+                    self.b_nodeTree.interface.move_to_parent(b_item, b_item_parent , index_to_move_to)
+                
+
 
         if (add_as_independent_tree == True):
             # Try to get it to show up to the top level editor
@@ -524,9 +582,11 @@ class NS_nodetree:
 
         # Now construct the node tree
         self.create_blender_nodes(self._nodes, self.b_nodeTree_name_actual, is_nodegroup = True)
-        
 
-    def create_blender_nodes(self, ns_nodes, nt_parent_name, is_nodegroup=False):
+        return self.b_nodeTree_name_actual
+    
+
+    def create_blender_nodes(self, ns_nodes, nt_parent_name, ns_interface = None, is_nodegroup=False):
         """
         Constructs a node tree
         :param ns_nodes: node sharer dict
@@ -661,6 +721,11 @@ class NS_nodetree:
                     print(e)
                     
         
+
+        # Now set up the top level nodegroup interface for Blender 4.0 and higher
+
+        
+
         # Now link together our nodes in the blender node graph
         for l in to_link:
             key, v = l.popitem()
