@@ -374,9 +374,9 @@ class NS_nodetree:
                 we're keeping things more dynamic here
         """
         # properties to save even when they're the default, which we normally don't save
-        _prop_always_save = ('position', 'name', 'description', 'in_out',
+        _prop_always_save = ('position', 'index', 'name', 'description', 'in_out', 'item_type',
                              'socket_type')
-        _prop_common_ignored = ('index','rna_type', 'bl_rna', 'bl_socket_idname',
+        _prop_common_ignored = ('rna_type', 'bl_rna', 'bl_socket_idname',
                                 'interface_items')
         # iterface_items above is where a panel stores it's children
         #  we already have parent data from each node, so we don't need that
@@ -515,12 +515,20 @@ class NS_nodetree:
                 else: 
                     print("Somehow had an interfaceItem that wasn't a socket or panel...")
                     continue
+                
+                print( "     #### Interface Item " + interfaceItem['name'])
 
                 for property in interfaceItem:
                     # skip a few properties we'll do later
                     if property not in _props_to_skip:
-                        print(interfaceItem['name'] + " has a property " + property + ": " +  interfaceItem[property])
-                        created_interfaceItem[property] = interfaceItem[property]
+                        print(interfaceItem['name'] + " has a property " + property + ": " +  str(interfaceItem[property]))
+                        if (created_interfaceItem.is_property_readonly(property) == True):
+                            print( property + " was read only")
+                        else:
+                            setattr(created_interfaceItem, property, interfaceItem[property])
+
+                            ####TODO: UPDATE OTHER THINGS TO SETATTR INSTEAD OF dict-LIKE ACCESS
+                        #created_interfaceItem[property] = interfaceItem[property]
                 
                 # store the reference for parenting 
                 list_of_interfaces[interfaceItem['index']] = {'ns_interface_item' : interfaceItem, 'b_interface_item' : created_interfaceItem}
@@ -536,11 +544,12 @@ class NS_nodetree:
                 ns_item = list_of_interfaces[i]['ns_interface_item']
                 b_item = list_of_interfaces[i]['b_interface_item']
                 parent_index = ns_item['parent']
-                if parent_index != 0:
+                if parent_index != -1:
                     b_item_parent = list_of_interfaces[parent_index]['b_interface_item']
                     index_to_move_to = (ns_item['index'] - parent_index) - 1
                     self.b_nodeTree.interface.move_to_parent(b_item, b_item_parent , index_to_move_to)
-                
+                i = i + 1
+
 
 
         if (add_as_independent_tree == True):
