@@ -139,19 +139,21 @@ class NS_node:
                     output_default_value = {}
                     for index, node_outputs in enumerate(self.blender_source_node.outputs):
                         # key = '' + str(idx)
+                        print ("Output node socket: " + str(index) + " : of : " + self.blender_source_node.name + " : value : " +node_outputs.type)
                         key = index
                         # save default values a node has
                         if hasattr(node_outputs, 'default_value') == False:
-                #            print (node_outputs.name + " has no default")
-                            continue
-                        if node_outputs.default_value == None:
-                #            print (node_outputs.name + " default is None")
-                            continue
-                        if type(node_outputs.default_value) == str:
+                            print (node_outputs.name + " has no default")
+                            
+                        elif node_outputs.default_value == None:
+                            print (node_outputs.name + " default is None")
+                            
+                        elif type(node_outputs.default_value) == str:
                             tmp_outputs[key] = node_outputs.default_value
                         else:
                             try:
                                 try:
+                                    print ("!!!")
                                     output_default_value[key] = round(node_outputs.default_value, 5)
                                 except:
                                     print("got here")
@@ -165,8 +167,9 @@ class NS_node:
                                 pass
 
                         try:
-                            # print('Dumping ' + key)
+                            print('node outputs of ' + node_outputs.name)
                             if node_outputs.is_linked:
+                                print("saving links")
                                 tmp_links = {}
                                 for node_links in node_outputs.links:
                                     s = node_links.to_socket.path_from_id()
@@ -184,8 +187,10 @@ class NS_node:
                         except:
                             tmp_outputs[node_outputs] = str(node_outputs.links)
                     if tmp_outputs != {}:
+                        print ("saved temp outputs?")
                         self.properties[k] = tmp_outputs
                     if output_default_value != {}:
+                        print("saved output default")
                         self.properties['out_dv'] = output_default_value
 
                 elif k == 'location':
