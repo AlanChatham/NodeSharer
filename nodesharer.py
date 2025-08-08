@@ -514,7 +514,8 @@ class NS_nodetree:
 
             for interfaceItem in self.interface.values():  #sorted(steps, key=lambda key: int(key))
                 if interfaceItem['item_type'] == "SOCKET":
-                    created_interfaceItem = self.b_nodeTree.interface.new_socket(interfaceItem['name'])
+                    created_interfaceItem = self.b_nodeTree.interface.new_socket(interfaceItem['name'],
+                                                                                 in_out = interfaceItem['in_out'])
                 elif interfaceItem['item_type'] == "PANEL":
                     created_interfaceItem = self.b_nodeTree.interface.new_panel(interfaceItem['name'])
                 else: 
