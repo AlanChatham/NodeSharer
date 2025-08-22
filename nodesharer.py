@@ -431,20 +431,28 @@ class NS_nodetree:
                 # Sometimes data comes in a list, like a vector, so deal with that 
                 if not isinstance(interface_properties[property], (int, str, bool, float)):
                     try:
+                        # If it's a list/vector, this should work
                         interface_properties[property] = tuple(interface_properties[property])
-#                        print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
+                        print("Saved " + property + " as a tuple, " + str(interface_properties[property]))
                     except Exception as e:
+                        # It was probably an object
                         print(e)
-                        print("Couldn't save " + property + " on it's own, trying to save it data.name_full")
+                        print("Couldn't save " + property + " on it's own, trying to save it's blender ID path ")
                         
                         try:
-                            interface_properties[property] = interface_properties[property].name_full
-#                            print("Saved " + property + " as a name, " + interface_properties[property])
+                            interface_properties[property] = repr(interface_properties[property])#.id_data
+                            print("Saved " + property + " as a name, " + interface_properties[property])
                         except Exception as e:
                             print(e)
                             interface_properties[property] = None
                             print("Couldn't save " + property + " as a name, either, so saving it as None")
-                            
+                # else:
+                #     try:
+                #         propertyValue = repr(interface_properties[property])
+                #         print ("saving a property " + property + " that wasn't just a value (probably an object)") 
+                #         print( "Value was: " + propertyValue)
+                #     except Exception as e:
+                #         print (e)           
             # It's VERY IMPORTANT we save these as their index, otherwise we
             #  won't have a reasonable way to restore ordering and parenting relationships
             #  upon loading. It's also the only way to guarantee each item has
@@ -502,7 +510,7 @@ class NS_nodetree:
         self.b_nodeTree_name_actual = self.b_nodeTree.name
         self.b_nodes = self.b_nodeTree.nodes
 
-        _props_to_skip = ('name', 'parent', 'index')
+        _props_to_skip = ('name', 'parent', 'index', 'socket_type')
 
         # As of blender 4.0, we also need to create an interface
         if hasattr(self.b_nodeTree, 'interface') and self.interface != None:
@@ -515,7 +523,8 @@ class NS_nodetree:
             for interfaceItem in self.interface.values():  #sorted(steps, key=lambda key: int(key))
                 if interfaceItem['item_type'] == "SOCKET":
                     created_interfaceItem = self.b_nodeTree.interface.new_socket(interfaceItem['name'],
-                                                                                 in_out = interfaceItem['in_out'])
+                                                                                 in_out = interfaceItem['in_out'],
+                                                                                 socket_type = interfaceItem['socket_type'])
                 elif interfaceItem['item_type'] == "PANEL":
                     created_interfaceItem = self.b_nodeTree.interface.new_panel(interfaceItem['name'])
                 else: 
@@ -527,11 +536,36 @@ class NS_nodetree:
                 for property in interfaceItem:
                     # skip a few properties we'll do later
                     if property not in _props_to_skip:
-                        print(interfaceItem['name'] + " has a property " + property + ": " +  str(interfaceItem[property]))
+                        propertyValue = interfaceItem[property]
+                        print(interfaceItem['name'] + " has a property " + property + ": " +  str(propertyValue))
                         if (created_interfaceItem.is_property_readonly(property) == True):
                             print( property + " was read only")
                         else:
-                            setattr(created_interfaceItem, property, interfaceItem[property])
+                            try:
+                                setattr(created_interfaceItem, property, propertyValue)
+                            except Exception as e:
+                                # Attribute wasn't a base type, this should trigger when
+                                #  we are seeing if we can load in an object reference (to an existing object in the file)
+                                print (e)
+                                if (isinstance(propertyValue, str)):
+                                    bpyDataPrefix = 'bpy.data.'
+                                    if (propertyValue.startswith(bpyDataPrefix)):
+                                        propertyValue = propertyValue[len(bpyDataPrefix):]
+                                        # path_resolve only works with double-quotes in dict lookups
+                                        propertyValue = propertyValue.replace("['", '["')                                        
+                                        propertyValue = propertyValue.replace("']", '"]')
+                                        print("trying to set: " + property + ", object located at: " + propertyValue)
+                                    try:
+                                        attributeObject = bpy.data.path_resolve(propertyValue)
+                                        print(repr(attributeObject))
+                                        setattr(created_interfaceItem, property, attributeObject)
+                                        print("should have set value....")
+                                    except Exception as e:
+                                        print(e)
+                                        print("Failed to assign property: " + property + ", value was: " + propertyValue)
+                                else:
+                                    print("Couldn't assign property: " + property + ", couldn't handle type: " + str(type(propertyValue)))
+                                
 
                             ####TODO: UPDATE OTHER THINGS TO SETATTR INSTEAD OF dict-LIKE ACCESS
                         #created_interfaceItem[property] = interfaceItem[property]
@@ -742,29 +776,34 @@ class NS_nodetree:
         
 
         # Now link together our nodes in the blender node graph
+        print ("#####  LINKING  #####")
         for l in to_link:
+            print(repr(l))
             key, v = l.popitem()
 
             for output, targets in v.items():
-                for name, ids in targets.items():
-                    input_ids = []
-                    if isinstance(ids, int):  # ids can be int or list.
-                        input_ids.append(ids)  # This is the very first backwards compatabilty compromise!
-                    else:
-                        input_ids.extend(ids)
-                    for i in input_ids:
-                        try:
-                            # groups changed from using node.input / node.output to 
-                            #  using nodegroup.interface
-                            # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
-                            bpy.data.node_groups[nt_parent_name].links.new(
-                                bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
-                                bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
-                            
+                # Check to make sure it's actually connected - non-connections can happen if
+                #  there's a default value, but it's not actually connected
+                if not isinstance(targets, (str, int, float, bool)):
+                    for name, ids in targets.items():
+                        input_ids = []
+                        if isinstance(ids, int):  # ids can be int or list.
+                            input_ids.append(ids)  # This is the very first backwards compatabilty compromise!
+                        else:
+                            input_ids.extend(ids)
+                        for i in input_ids:
+                            try:
+                                # groups changed from using node.input / node.output to 
+                                #  using nodegroup.interface
+                                # nt.links.new(b_nodes[k].outputs[int(output)], b_nodes[name].inputs[i])  # original
+                                bpy.data.node_groups[nt_parent_name].links.new(
+                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[key]].outputs[int(output)],
+                                    bpy.data.node_groups[nt_parent_name].nodes[b_node_names[name]].inputs[i])  # test
+                                
 
-                        except Exception as e:
-                            print('Failed to link')
-                            print(e)
+                            except Exception as e:
+                                print('Failed to link')
+                                print(e)
         
         # And set up our parent/child relationships of the nodes on the blender node graph
         for key, v in to_parent.items():
